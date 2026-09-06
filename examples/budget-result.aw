@@ -1,0 +1,13 @@
+(export main
+  (fn (run spent u32)
+    (fn (run proposed u32)
+      (fn (run ceiling u32)
+        (fn (run field u32)
+          (let (run total u32) (add spent proposed)
+            (let (run result (product u32 u32))
+              (if (u32-lt total spent)
+                (pair 1 0)
+                (if (u32-le total ceiling)
+                  (pair 0 total)
+                  (pair 2 0)))
+              (if (u32-eq field 0) (fst result) (snd result)))))))))

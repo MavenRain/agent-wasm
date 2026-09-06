@@ -29,6 +29,23 @@ let as_scalar = function
   | Closure _ -> Error (Backend "function used as a scalar")
   | Pair _ -> Error (Backend "pair used as a scalar")
 
+(* Branch effects run once before field selection. Unselected branch locals
+   are never read by the selected arm. Products have no heap representation. *)
+let rec merge budget state condition a b =
+  let* () = Budget.tick budget in
+  match a, b with
+  | Scalar a, Scalar b ->
+      bind state (If (condition, { bindings = []; result = a },
+                                { bindings = []; result = b }))
+  | Pair (a1, a2), Pair (b1, b2) ->
+      let* first, state = merge budget state condition a1 b1 in
+      let* second, state = merge budget state condition a2 b2 in
+      Ok (Pair (first, second), state)
+  | Closure _, _ | (Scalar _ | Pair _), Closure _ ->
+      Error (Backend "conditional function value")
+  | Scalar _, Pair _ | Pair _, Scalar _ ->
+      Error (Backend "conditional shape mismatch")
+
 (* Static closure expansion is deliberately limited to this pure, finite slice.
    Scalar operations stay executable and each receives a Wasm local. *)
 let rec evaluate budget state scope term =
@@ -69,12 +86,21 @@ let rec evaluate budget state scope term =
       let* c = as_scalar c in
       (* Branch instructions remain nested, while local numbers are disjoint. *)
       let* a, a_state = evaluate budget { next = state.next; bindings = [] } scope a in
-      let* a = as_scalar a in
       let* b, b_state = evaluate budget { next = a_state.next; bindings = [] } scope b in
-      let* b = as_scalar b in
-      bind { state with next = b_state.next }
-        (If (c, { bindings = a_state.bindings; result = a },
-                { bindings = b_state.bindings; result = b }))
+      (match a, b with
+       | Scalar a, Scalar b ->
+           bind { state with next = b_state.next }
+             (If (c, { bindings = a_state.bindings; result = a },
+                     { bindings = b_state.bindings; result = b }))
+       | Pair _, Pair _ ->
+           let* _, state = bind { state with next = b_state.next }
+             (If (c, { bindings = a_state.bindings; result = Const 0L },
+                     { bindings = b_state.bindings; result = Const 0L })) in
+           merge budget state c a b
+       | Closure _, _ | (Scalar _ | Pair _), Closure _ ->
+           Error (Backend "conditional function value")
+       | Scalar _, Pair _ | Pair _, Scalar _ ->
+           Error (Backend "conditional shape mismatch"))
   | Erase.Fn body -> Ok (Closure (scope, body), state)
   | Erase.Call (f, a) ->
       let* f, state = evaluate budget state scope f in

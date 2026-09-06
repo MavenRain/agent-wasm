@@ -1,5 +1,33 @@
 # Compiler validation, 2026-09-06
 
+## M1 product conditionals, 2026-09-06
+
+From commit `2fddd85`, product conditionals and the budget-result example:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 129 cases, 0 failures
+  e2e: 605 programs, 1210 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+New cases cover nested mixed scalar products, branch-local computations, erased
+binder remapping, both selections, mismatched fields and shapes, function and
+ghost evidence field rejection, closed conversion, and exact compilation fuel.
+The host suite checks 216 budget-result inputs against exact JS addition,
+12 nested product programs against the independent interpreter, and a product
+conditional at exactly 50,000 locals. One additional local is rejected while
+preserving output artifacts. The previously unpinned normalization of a stuck
+transport's value now has a kernel regression. Earlier benchmark snapshots below
+are historical and were not refreshed for this slice.
+
+## Original M0 validation
+
 Environment: macOS arm64, OCaml 5.2.1, Dune 3.24.2, Node v23.10.0,
 Wasmtime 48.0.1. Commands run from the project root.
 

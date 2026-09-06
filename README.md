@@ -75,7 +75,7 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 # 0
 ```
 
-Comparisons produce internal booleans and `if` selects matching u32 or bool
+Comparisons produce internal booleans and `if` selects matching u32, bool, or nested product
 branches. Sums and validators returning values with erased evidence remain
 on the M1 roadmap.
 
@@ -106,6 +106,21 @@ node scripts/run.mjs artifacts/budget-policy.wasm 4294967295 1 100
 ```
 
 The example detects overflow before comparing the modular total with the ceiling.
+
+`examples/budget-result.aw` returns an internal `(product u32 u32)` from a
+conditional: status 0 with the accepted total, status 1 with zero for overflow,
+or status 2 with zero for exceeding the ceiling. Its fourth integer argument
+selects the status (0) or payload (any other value), preserving the integer ABI.
+
+```sh
+_build/default/bin/main.exe compile examples/budget-result.aw artifacts/budget-result.wasm
+node scripts/run.mjs artifacts/budget-result.wasm 60 40 100 1
+# 100
+node scripts/run.mjs artifacts/budget-result.wasm 4294967295 1 100 0
+# 1
+node scripts/run.mjs artifacts/budget-result.wasm 60 41 100 0
+# 2
+```
 It returns a decision; structured errors and evidence-bearing results remain open.
 
 Equality transport rewrites a type family using checked evidence:

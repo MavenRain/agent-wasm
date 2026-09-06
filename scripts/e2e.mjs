@@ -63,6 +63,21 @@ function generate(depth, names) {
 }
 
 const cases = [];
+for (const x of [0, 1, 99, 100, 0x80000000, 0xffffffff]) {
+  for (const projection of ['fst', 'snd']) {
+    cases.push({ name: `product-if-${projection}-${x}`, args: [x], body:
+      ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'proof', ['eq', 'x', 'x']], ['refl', 'x'],
+        ['let', ['run', 'p', ['product', 'u32', ['product', 'bool', 'u32']]],
+          ['if', ['u32-lt', 'x', 100],
+            ['let', ['run', 'y', 'u32'], ['add', 'x', 3],
+              ['pair', ['add', 'y', 7], ['pair', 'true', ['add', 'y', 11]]]],
+            ['if', ['u32-eq', 'x', 100], ['pair', 23, ['pair', 'false', 29]],
+              ['pair', ['add', 'x', 17], ['pair', 'true', ['add', 'x', 19]]]]],
+          ['add', ['if', ['fst', ['snd', 'p']], ['fst', 'p'], 31],
+            projection === 'fst' ? ['fst', 'p'] : ['snd', ['snd', 'p']]]]]]
+    });
+  }
+}
 for (const input of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
   cases.push({ name: `transport-example-${input}`, file: 'examples/transport.aw',
     args: [input], expected: (input + 1) >>> 0 });
@@ -130,6 +145,13 @@ for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
       cases.push({ name: `budget-policy-${spent}-${proposed}-${ceiling}`,
         file: 'examples/budget-policy.aw',
         args: [spent, proposed, ceiling], expected: Number(spent + proposed <= ceiling) });
+      for (const field of [0, 1]) {
+        const total = spent + proposed;
+        const status = total > 0xffffffff ? 1 : total > ceiling ? 2 : 0;
+        cases.push({ name: `budget-result-${spent}-${proposed}-${ceiling}-${field}`,
+          file: 'examples/budget-result.aw', args: [spent, proposed, ceiling, field],
+          expected: field === 0 ? status : status === 0 ? total : 0 });
+      }
     }
   }
 }
@@ -193,6 +215,9 @@ cases.push({ name: 'local-limit-with-parameter', body: ['fn', ['run', 'x', 'u32'
   additions(49999, 'x')], args: [2], fuel: '100000000' });
 cases.push({ name: 'branch-local-limit', body: ['if', ['u32-lt', 1, 2],
   additions(24999, 1), additions(24999, 2)], args: [], fuel: '100000000' });
+cases.push({ name: 'product-branch-local-limit', body: ['snd', ['if', 'false',
+  ['pair', additions(24998, 1), 7], ['pair', 11, additions(24999, 2)]]],
+  args: [], fuel: '100000000' });
 
 try {
   let hostCalls = 0;
@@ -285,6 +310,8 @@ try {
     }
   }
   for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
+    ['snd', ['if', 'false', ['pair', additions(24999, 1), 7],
+      ['pair', 11, additions(24999, 2)]]],
     ['fst', ['pair', 42, additions(50001, 1)]],
     ['snd', ['pair', additions(25000, 1), additions(25001, 2)]],
     additions(65535, 1), ['if', ['u32-lt', 1, 2], additions(25000, 1), additions(24999, 2)]]) {

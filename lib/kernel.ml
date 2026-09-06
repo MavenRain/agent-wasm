@@ -98,6 +98,13 @@ let equivalent budget a b =
   if a = b then Ok () else Error Type_mismatch
 
 let argument_phase phase = function Runtime -> phase | Erased -> Ghost
+let rec branch_type budget ty =
+  let* () = Budget.tick budget in
+  match ty with
+  | U32 | Bool -> Ok ()
+  | Product (a, b) -> let* () = branch_type budget a in branch_type budget b
+  | Eq _ | Pi _ -> Error Type_mismatch
+
 let rec runtime_type = function
   | Eq _ -> Error Runtime_proof
   | U32 | Bool | Pi _ -> Ok ()
@@ -154,11 +161,9 @@ and infer budget phase context term =
   | If (c, a, b) ->
       let* () = check_term budget phase context c Bool in
       let* ty = infer budget phase context a in
-      (match ty with
-       | U32 | Bool ->
-           let* () = check_term budget phase context b ty in
-           Ok ty
-       | Product _ | Eq _ | Pi _ -> Error Type_mismatch)
+      let* () = branch_type budget ty in
+      let* () = check_term budget phase context b ty in
+      Ok ty
   | Add (a, b) ->
       let* () = check_term budget phase context a U32 in
       let* () = check_term budget phase context b U32 in

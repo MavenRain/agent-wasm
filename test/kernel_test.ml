@@ -123,8 +123,33 @@ let cases = [
   "boolean conditional export", (fun () -> rejected Unsupported_export "(if true false true)");
   "boolean dead branch erased use", (fun () -> rejected (Erased_use 0)
     "(let (erase b bool) true (if (if true false b) 1 0))");
-  "matching product branches rejected", (fun () -> rejected Type_mismatch
+  "matching product branches", (fun () -> accepted
     "(fst (if true (pair 1 2) (pair 3 4)))");
+  "nested product branches", (fun () -> accepted
+    "(snd (snd (if false (pair true (pair 1 2)) (pair false (pair 3 4)))))");
+  "product branch field mismatch", (fun () -> rejected Type_mismatch
+    "(fst (if true (pair 1 true) (pair 2 3)))");
+  "product branch shape mismatch", (fun () -> rejected Type_mismatch
+    "(fst (if true (pair 1 (pair 2 3)) (pair (pair 1 2) 3)))");
+  "conditional function field rejected", (fun () -> rejected Type_mismatch
+    "(fst (if true (pair 1 (fn (run x u32) x)) (pair 2 (fn (run x u32) x))))");
+  "conditional first function field rejected", (fun () -> rejected Type_mismatch
+    "(snd (if true (pair (fn (run x u32) x) 1) (pair (fn (run x u32) x) 2)))");
+  "product conditional conversion", (fun () -> accepted
+    "(let (erase p (eq (snd (if false (pair 1 2) (pair 3 4))) 4)) (refl 4) 0)");
+  "ghost conditional evidence fields rejected", (fun () -> rejected Type_mismatch
+    "(let (erase p (product u32 (eq 1 1))) (if true (pair 0 (refl 1)) (pair 0 (refl 1))) 0)");
+  "product conditional exact budget", (fun () ->
+    let body = "(fn (run x u32) (snd (if (u32-lt x 10) (pair (add x 1) (add x 2)) (pair (add x 3) (add x 4)))))" in
+    let source = "(export main " ^ body ^ ")" in
+    let* artifact = Compiler.compile source in
+    let* exact = Compiler.compile ~fuel:artifact.steps source in
+    if exact.wasm <> artifact.wasm then Error (Backend "nondeterministic output")
+    else Result.fold ~ok:(fun _ -> Error (Backend "product budget bypass"))
+      ~error:(fun e -> if e = Budget_exhausted then Ok () else Error e)
+      (Compiler.compile ~fuel:(artifact.steps - 1) source));
+  "stuck transport normalizes value", (fun () -> accepted
+    "(let (erase f (pi (erase p (eq 0 0)) (eq (transport (x u32) 0 0 p (add 1 2)) (transport (x u32) 0 0 p 3)))) (fn (erase p (eq 0 0)) (refl (transport (x u32) 0 0 p 3))) 42)");
   "strict comparison equal conversion", (fun () -> accepted
     "(let (erase p (eq (if (u32-lt 5 5) 1 2) 2)) (refl 2) 0)");
   "inclusive comparison equal conversion", (fun () -> accepted

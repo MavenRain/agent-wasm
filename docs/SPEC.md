@@ -51,11 +51,11 @@ numbers suitable for unchecked budget arithmetic.
 `bool` is distinct from `u32`. The three comparisons accept u32 operands and
 return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
-two branches of the same scalar type, either u32 or bool. Both branches are
+two branches of the same type: u32, bool, or nested products of those types. Both branches are
 checked in the enclosing phase, including an unreachable branch. At runtime
 the condition is evaluated first and only the selected branch executes.
-Function-valued and product-valued branches are
-not supported in this slice. Internal functions and lets can bind booleans;
+Function and evidence fields are not supported in conditional results, including
+inside nested products. Internal functions and lets can bind booleans;
 the export ABI remains exclusively `u32 -> ... -> u32`.
 
 Conversion reduces closed comparisons and selects a branch when the normalized
@@ -67,11 +67,20 @@ does not itself construct equality evidence or refine the checking context.
 Erasure lowers boolean literals to canonical i32 values 0 and 1, preserves runtime
 comparisons and conditions, and deletes erased boolean bindings in the same way
 as other ghost values. Code generation emits `i32.eq`, `i32.lt_u`, `i32.le_u`, and
-result-valued Wasm `if`/`else` blocks. Each comparison and conditional receives a
+result-valued Wasm `if`/`else` blocks. Each comparison and scalar conditional receives a
 local, as does addition. Locals from both branches count toward the combined
 50,000 limit and have distinct indices; their instructions remain inside their
 respective branches. Static expansion and serialization charge both branches
 against the compilation budget even though execution chooses only one.
+
+A product conditional executes its selected branch's bindings once in an initial
+Wasm conditional with a dummy scalar result. It then selects each scalar leaf
+with an empty-binding conditional using the original condition. This allocates
+one local for branch execution plus one per leaf, with no heap object or ABI
+change. Selection reads only the selected branch's locals. Recursive type checks
+and field merging charge the shared budget; all generated locals count toward
+the same limit. Products containing functions remain available outside conditional
+results.
 
 `examples/price-ceiling.aw` returns 1 when an input price is at most 100, else 0.
 It uses no arithmetic on amounts. This is an executable predicate, not yet the

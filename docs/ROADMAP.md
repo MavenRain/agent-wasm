@@ -48,6 +48,12 @@ transport reduces during conversion; transport with an open proof stays
 symbolic. The symmetry example emits the same module as plain increment.
 This does not yet connect executable comparisons to refined evidence.
 
+Implemented fifth slice: conditionals return nested products of scalar fields.
+The budget-result example returns an internal status/payload pair, distinguishing
+overflow from exceeding a ceiling and retaining the accepted total. Selected
+branch computations execute once, followed by scalar field selection. Sums,
+named records, dependent pairs, and evidence-bearing results remain open.
+
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported
 fragment before calling it verified. Use adversarial examples and an independent
