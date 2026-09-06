@@ -31,7 +31,10 @@ term    ::= integer | name
 
 Semicolon comments run to the end of the line. Binding is lexical; shadowing is
 allowed. Names elaborate to de Bruijn indices, including occurrences in types.
-Integer literals range from 0 through 4294967295. Addition is modulo 2^32 in
+Integer literals use one or more ASCII decimal digits and range from 0 through
+4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
+rejected. Tokens starting with a digit or sign are reserved for literals.
+Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
 numbers suitable for unchecked budget arithmetic.
 
@@ -101,6 +104,10 @@ lookup, structural comparison, allocation, diagnostics, and byte serialization
 are not individually charged. A step is not a wall-clock or memory bound. Input
 is currently read before the parser applies its size limit. Library callers that
 construct ASTs directly bypass parser size and depth limits.
+
+The backend caps the combined count of entry parameters and generated locals at
+50,000. Exceeding this compiler portability limit is a backend error, even with
+increased fuel, and does not create or replace the output file.
 
 Trusted components include the hand-written checker, erasure, backend, OCaml
 toolchain/runtime, Wasm engine, and host runner. The kernel and erasure have

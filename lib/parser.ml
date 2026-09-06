@@ -54,6 +54,25 @@ let lookup name names =
     | x :: rest -> if x = name then Ok (Var i) else loop (i + 1) rest
   in loop 0 names
 
+let atom names name =
+  let digit c = c >= '0' && c <= '9' in
+  let numeric = Option.fold ~none:false
+    ~some:(fun (c, _) -> digit c || c = '+' || c = '-')
+    (Seq.uncons (String.to_seq name)) in
+  if not numeric then lookup name names
+  else if not (String.for_all digit name) then
+    Error (Parse "expected an unsigned decimal u32 literal")
+  else
+    (* Accumulate within u32 so even arbitrarily long tokens have a numeric
+       diagnostic, without relying on the host's integer literal syntax. *)
+    String.fold_left (fun acc c ->
+      let* n = acc in
+      let next = Int64.add (Int64.mul n 10L)
+        (Int64.of_int (Char.code c - Char.code '0')) in
+      if next > mask then Error (Parse "decimal literal outside u32 range")
+      else Ok next) (Ok 0L) name
+    |> Result.map (fun n -> Lit n)
+
 let rec ty budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -72,10 +91,7 @@ and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
   | Atom name ->
-      Option.fold
-        ~none:(fun () -> lookup name names)
-        ~some:(fun n () -> if n < 0L || n > mask then Error (Invalid_u32 n) else Ok (Lit n))
-        (Int64.of_string_opt name) ()
+      atom names name
   | List [Atom "add"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in

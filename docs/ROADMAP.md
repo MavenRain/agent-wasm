@@ -7,6 +7,9 @@ shared checking budget, proof-free runtime IR, direct integer Wasm emission,
 CLI, rejection tests, differential host execution, and an informational OCaml
 comparison harness. The name and surface syntax remain provisional.
 
+Hardening: decimal-only literal syntax, a 50,000 combined parameter/local backend
+limit, and host regressions for boundary rejection and parameter order are in place.
+
 ## M1: dependent data and executable validation
 
 Add sums, records, booleans, comparisons, dependent pairs, and equality transport

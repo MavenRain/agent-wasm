@@ -32,6 +32,28 @@ syntax, and budget exhaustion do not create or alter the requested output.
 The CLI rejects attempts to overwrite its source through the same path, a path
 alias, a symlink, or a hardlink, and reports missing input/output directory errors.
 
+## M0 hardening follow-up, 2026-09-06
+
+After bounding backend locals and specifying decimal-only literal syntax:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 34 cases, 0 failures
+  e2e: 116 programs, 232 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny lib bin test
+  no obligations at or above medium in 14 files
+```
+
+Both hosts execute programs at the 50,000 combined parameter/local limit,
+including a case with one runtime parameter. The suite rejects one-over-limit
+programs with and without a parameter, plus the original 65,536-leaf reproducer,
+using increased fuel. Each rejection preserves an existing artifact and creates
+no new artifact. Argument-selection cases distinguish all three entry parameters,
+also with an intervening erased proof binder. Literal cases cover leading zeros,
+non-decimal syntax, signed syntax, separators, and values beyond both u32 and i64.
+
 ## Initial performance evidence
 
 Command: `opam exec -- python3 -P scripts/bench.py`.

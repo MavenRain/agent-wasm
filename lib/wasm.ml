@@ -5,6 +5,10 @@ type expression = Value of scalar | Add of scalar * scalar
 type value = Scalar of scalar | Closure of value list * Erase.term
 type state = { mutable next : int; mutable bindings : (int * expression) list }
 
+(* A compiler portability limit, counting parameters and generated locals. *)
+let max_locals = 50_000
+let local_limit = Backend "function exceeds 50000 parameters and locals"
+
 let as_scalar = function
   | Scalar s -> Ok s
   | Closure _ -> Error (Backend "function used as a scalar")
@@ -21,6 +25,7 @@ let rec evaluate budget state scope term =
       let* a = as_scalar a in
       let* b = evaluate budget state scope b in
       let* b = as_scalar b in
+      let* () = if state.next >= max_locals then Error local_limit else Ok () in
       let local = state.next in
       state.next <- local + 1;
       state.bindings <- (local, Add (a, b)) :: state.bindings;
@@ -70,6 +75,7 @@ let emit_expression output = function
   | Add (a, b) -> emit_scalar output a; emit_scalar output b; byte output 0x6a
 
 let emit budget program =
+  let* () = if program.Erase.arity > max_locals then Error local_limit else Ok () in
   let state = { next = program.Erase.arity; bindings = [] } in
   let* entry = evaluate budget state [] program.body in
   let rec parameters index value =
@@ -83,7 +89,11 @@ let emit budget program =
   Buffer.add_string output "\x00asm\x01\x00\x00\x00";
   section output 1 (contents (fun b ->
     unsigned b 1; byte b 0x60; unsigned b program.arity;
-    for _parameter = 1 to program.arity do byte b 0x7f done;
+    let rec parameter_types remaining =
+      if remaining = 0 then ()
+      else (byte b 0x7f; parameter_types (remaining - 1))
+    in
+    parameter_types program.arity;
     unsigned b 1; byte b 0x7f));
   section output 3 "\x01\x00";
   section output 7 "\x01\x04main\x00\x00";

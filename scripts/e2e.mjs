@@ -63,6 +63,26 @@ cases.push({ name: 'capture', body: ['fn', ['run', 'x', 'u32'],
     ['fn', ['run', 'z', 'u32'], ['add', 'y', 'z']]], 'x'], 2]], args: [40] });
 cases.push({ name: 'two-arguments', body: ['fn', ['run', 'x', 'u32'],
   ['fn', ['run', 'y', 'u32'], ['add', 'x', 'y']]], args: [0xffffffff, 2] });
+for (const selected of ['x', 'y', 'z']) {
+  cases.push({ name: `select-${selected}`, body: ['fn', ['run', 'x', 'u32'],
+    ['fn', ['run', 'y', 'u32'], ['fn', ['run', 'z', 'u32'], selected]]],
+    args: [11, 22, 33] });
+  cases.push({ name: `erased-select-${selected}`, body: ['fn', ['run', 'x', 'u32'],
+    ['let', ['erase', 'p', ['eq', 'x', 'x']], ['refl', 'x'],
+      ['fn', ['run', 'y', 'u32'], ['fn', ['run', 'z', 'u32'], selected]]]],
+    args: [11, 22, 33] });
+}
+cases.push({ name: 'leading-zeros', body: '00000000000000000000000042', args: [] });
+
+// Balanced trees reach the backend limit without exceeding parser depth.
+function additions(count, leaf) {
+  if (count === 0) return leaf;
+  const left = Math.floor((count - 1) / 2);
+  return ['add', additions(left, leaf), additions(count - 1 - left, leaf)];
+}
+cases.push({ name: 'local-limit', body: additions(50000, 1), args: [], fuel: '100000000' });
+cases.push({ name: 'local-limit-with-parameter', body: ['fn', ['run', 'x', 'u32'],
+  additions(49999, 'x')], args: [2], fuel: '100000000' });
 
 try {
   let hostCalls = 0;
@@ -70,7 +90,7 @@ try {
     const input = join(scratch, `${test.name}.aw`);
     const output = join(scratch, `${test.name}.wasm`);
     writeFileSync(input, `(export main ${source(test.body)})\n`);
-    run(compiler, ['compile', input, output]);
+    run(compiler, [...(test.fuel ? ['--fuel', test.fuel] : []), 'compile', input, output]);
     const bytes = readFileSync(output);
     assert(WebAssembly.validate(bytes), `${test.name}: invalid binary`);
     const module = new WebAssembly.Module(bytes);
@@ -108,6 +128,22 @@ try {
     writeFileSync(malformed, text);
     assert.throws(() => run(compiler, ['compile', malformed, output]));
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+  }
+  for (const literal of ['0x2A', '0o52', '0b101010', '1_0', '+7', '-0', '-1', '0u42', '42x',
+    '4294967296', '999999999999999999999999']) {
+    writeFileSync(malformed, `(export main ${literal})`);
+    assert.throws(() => run(compiler, ['compile', malformed, output]), /parse:/);
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+  }
+  for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
+    additions(65535, 1)]) {
+    writeFileSync(malformed, `(export main ${source(body)})`);
+    for (const target of [output, join(scratch, 'over-limit.wasm')]) {
+      assert.throws(() => run(compiler, ['--fuel', '100000000', 'compile', malformed, target]),
+        /backend: function exceeds 50000 parameters and locals/);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+    assert(!existsSync(join(scratch, 'over-limit.wasm')));
   }
   const protectedSource = join(scratch, 'protected.aw');
   writeFileSync(protectedSource, '(export main 42)');

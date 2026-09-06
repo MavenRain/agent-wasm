@@ -23,8 +23,14 @@ let dependent n x proof =
 let cases = [
   "literal", (fun () -> accepted "42");
   "u32 maximum", (fun () -> accepted "4294967295");
-  "negative", (fun () -> rejected (Invalid_u32 (-1L)) "-1");
-  "overflow literal", (fun () -> rejected (Invalid_u32 4294967296L) "4294967296");
+  "negative", (fun () -> rejected (Parse "expected an unsigned decimal u32 literal") "-1");
+  "overflow literal", (fun () -> rejected (Parse "decimal literal outside u32 range") "4294967296");
+  "huge literal", (fun () -> rejected (Parse "decimal literal outside u32 range") "999999999999999999999999");
+  "leading zeros", (fun () -> same_output "00000000000000000000000042" "42");
+  "alternate literals", (fun () -> List.fold_left (fun acc literal ->
+    let* () = acc in
+    rejected (Parse "expected an unsigned decimal u32 literal") literal)
+    (Ok ()) ["0x2A"; "0o52"; "0b101010"; "1_0"; "+7"; "-0"; "0u42"; "42x"]);
   "unknown name", (fun () -> rejected (Unknown_name "missing") "missing");
   "non-function call", (fun () -> rejected Expected_function "(app run 1 2)");
   "false proof", (fun () -> rejected Type_mismatch "(let (erase p (eq 1 2)) (refl 1) 42)");
