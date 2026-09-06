@@ -1,8 +1,43 @@
 # Compiler validation, 2026-09-06
 
+## M1 internal sums, 2026-09-06
+
+Implemented on base commit `d1077d2` in an isolated workspace checkout:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 161 cases, 0 failures
+  e2e: 858 programs, 1716 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+The 32 new kernel cases cover injection typing, both case handlers, scalar-only
+export restrictions, nested payload restrictions, erased uses, binder scope,
+closed and open conversion, substitution capture, transport, and ghost erasure.
+A fixed product-returning case with a sum-valued condition compiles in exactly
+182 shared steps and rejects fuel 181. This pins sum shape traversal, branch
+checking, erasure, merging, and emission together.
+
+The independent named-variable interpreter represents sums as tagged objects.
+Generated programs now include sum conditionals and case binders. Directed
+programs cover nested heterogeneous sums, product and boolean case results,
+sum-returning cases, closure arguments, repeated applications, and outer runtime
+captures separated by erased binders. The actual budget-sum example runs for
+216 combinations against exact JavaScript arithmetic. Both hosts execute case
+and sum-conditional fixtures at 50,000 locals; corresponding 50,001-local
+programs are rejected. CLI malformed sums, type errors, reserved handler names,
+and erased uses preserve existing outputs and create no absent outputs.
+
+No benchmark was refreshed, and no mechanized preservation claim is made.
+
 ## M1 product conditionals, 2026-09-06
 
-From commit `2fddd85`, product conditionals and the budget-result example:
+Implemented on base commit `2fddd85`, product conditionals and budget-result:
 
 ```text
 sh scripts/check.sh

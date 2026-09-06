@@ -6,7 +6,8 @@ is a working name. The intended applications are private inference clients,
 constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
-arithmetic, booleans, unsigned comparisons, conditional branches, pairs, dependent
+arithmetic, booleans, unsigned comparisons, conditional branches, pairs, sums,
+case analysis, dependent
 function types, erased arguments, equality evidence, and equality transport.
 It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
 cryptography, or persistence. Proof checking and erasure are tested, not formally
@@ -75,8 +76,8 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 # 0
 ```
 
-Comparisons produce internal booleans and `if` selects matching u32, bool, or nested product
-branches. Sums and validators returning values with erased evidence remain
+Comparisons produce internal booleans and `if` selects matching u32, bool,
+or nested product and sum branches. Validators returning erased evidence remain
 on the M1 roadmap.
 
 This slice adds `(product A B)`, `(pair a b)`, `fst`, and `snd` for internal
@@ -121,7 +122,24 @@ node scripts/run.mjs artifacts/budget-result.wasm 4294967295 1 100 0
 node scripts/run.mjs artifacts/budget-result.wasm 60 41 100 0
 # 2
 ```
-It returns a decision; structured errors and evidence-bearing results remain open.
+
+`examples/budget-sum.aw` expresses the result as `(sum u32 u32)`: `(inl u32
+error)` carries an error code, while `(inr u32 total)` carries a successful
+total. `(case u32 result (error ...) (value ...))` checks both handlers and
+executes the selected one. Its fourth argument exposes status or payload using
+the same convention as budget-result:
+
+```sh
+_build/default/bin/main.exe compile examples/budget-sum.aw artifacts/budget-sum.wasm
+node scripts/run.mjs artifacts/budget-sum.wasm 60 40 100 1
+# 100
+node scripts/run.mjs artifacts/budget-sum.wasm 4294967295 1 100 0
+# 1
+```
+
+Sum payloads can contain scalars, products, and nested sums. Function and proof
+payloads are not yet supported. Internal sums use a tag and payload slots;
+the public ABI remains integers.
 
 Equality transport rewrites a type family using checked evidence:
 `(transport (index FAMILY) from to proof value)` takes a value of `FAMILY[from]`

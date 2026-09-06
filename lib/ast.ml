@@ -2,7 +2,7 @@ type relevance = Runtime | Erased
 
 type comparison = Equal | Less | Less_equal
 
-type ty = U32 | Bool | Product of ty * ty | Eq of term * term | Pi of relevance * ty * ty
+type ty = U32 | Bool | Product of ty * ty | Sum of ty * ty | Eq of term * term | Pi of relevance * ty * ty
 and term =
   | Var of int
   | Lit of int64
@@ -13,6 +13,10 @@ and term =
   | Pair of term * term
   | Fst of term
   | Snd of term
+  | Inl of ty * term
+  | Inr of ty * term
+  (* The result type is outside both payload binders. *)
+  | Case of ty * term * term * term
   | Lam of relevance * ty * term
   | App of relevance * term * term
   | Let of relevance * ty * term * term
@@ -37,6 +41,20 @@ let rec map_term budget variable depth term =
   | Var k -> variable depth k
   | Lit n -> Ok (Lit n)
   | Boolean b -> Ok (Boolean b)
+  | Inl (ty, a) ->
+      let* ty = map_ty budget variable depth ty in
+      let* a = map_term budget variable depth a in
+      Ok (Inl (ty, a))
+  | Inr (ty, a) ->
+      let* ty = map_ty budget variable depth ty in
+      let* a = map_term budget variable depth a in
+      Ok (Inr (ty, a))
+  | Case (ty, value, a, b) ->
+      let* ty = map_ty budget variable depth ty in
+      let* value = map_term budget variable depth value in
+      let* a = map_term budget variable (depth + 1) a in
+      let* b = map_term budget variable (depth + 1) b in
+      Ok (Case (ty, value, a, b))
   | Pair (a, b) ->
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
@@ -86,6 +104,10 @@ and map_ty budget variable depth ty =
   match ty with
   | U32 -> Ok U32
   | Bool -> Ok Bool
+  | Sum (a, b) ->
+      let* a = map_ty budget variable depth a in
+      let* b = map_ty budget variable depth b in
+      Ok (Sum (a, b))
   | Product (a, b) ->
       let* a = map_ty budget variable depth a in
       let* b = map_ty budget variable depth b in

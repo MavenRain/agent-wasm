@@ -18,6 +18,21 @@ type term =
 type t = { body : term; arity : int }
 
 let run budget checked =
+  (* Only the finite scalar shape survives, never source types or evidence. *)
+  let rec zero ty =
+    let* () = Budget.tick budget in
+    match ty with
+    | Ast.U32 | Ast.Bool -> Ok (Const 0L)
+    | Ast.Product (a, b) ->
+        let* a = zero a in
+        let* b = zero b in
+        Ok (Pair (a, b))
+    | Ast.Sum (a, b) ->
+        let* a = zero a in
+        let* b = zero b in
+        Ok (Pair (Const 1L, Pair (a, b)))
+    | Ast.Eq _ | Ast.Pi _ -> Error (Backend "unsupported sum payload")
+  in
   let rec walk scope depth term =
     let* () = Budget.tick budget in
     match term with
@@ -27,6 +42,22 @@ let run budget checked =
         Ok (Local (depth - level - 1))
     | Ast.Lit n -> Ok (Const n)
     | Ast.Boolean b -> Ok (Const (if b then 1L else 0L))
+    | Ast.Inl (other, value) ->
+        let* value = walk scope depth value in
+        let* other = zero other in
+        Ok (Pair (Const 1L, Pair (value, other)))
+    | Ast.Inr (other, value) ->
+        let* value = walk scope depth value in
+        let* other = zero other in
+        Ok (Pair (Const 0L, Pair (other, value)))
+    | Ast.Case (_, value, a, b) ->
+        let* value = walk scope depth value in
+        (* The scrutinee gets a runtime-only binder, then each payload gets
+           its source binder. Outer levels must account for both. *)
+        let* a = walk (Some (depth + 1) :: scope) (depth + 2) a in
+        let* b = walk (Some (depth + 1) :: scope) (depth + 2) b in
+        Ok (Let (value, If (Fst (Local 0),
+          Let (Fst (Snd (Local 0)), a), Let (Snd (Snd (Local 0)), b))))
     | Ast.Pair (a, b) ->
         let* a = walk scope depth a in
         let* b = walk scope depth b in

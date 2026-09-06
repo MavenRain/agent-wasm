@@ -20,6 +20,13 @@ function interpret(tree, env = new Map()) {
     return env.get(tree);
   }
   switch (tree[0]) {
+    case 'inl': return { side: 'left', value: interpret(tree[2], env) };
+    case 'inr': return { side: 'right', value: interpret(tree[2], env) };
+    case 'case': {
+      const value = interpret(tree[2], env);
+      const [name, body] = tree[value.side === 'left' ? 3 : 4];
+      return interpret(body, new Map([...env, [name, value.value]]));
+    }
     case 'pair': return [interpret(tree[1], env), interpret(tree[2], env)];
     case 'fst': return interpret(tree[1], env)[0];
     case 'snd': return interpret(tree[1], env)[1];
@@ -44,7 +51,7 @@ let fresh = 0;
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(7)) {
+  switch (random(8)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -58,11 +65,57 @@ function generate(depth, names) {
       generate(depth - 1, names), generate(depth - 1, names)];
     case 6: return [random(2) ? 'fst' : 'snd', ['pair',
       generate(depth - 1, names), generate(depth - 1, names)]];
+    case 7: return ['case', 'u32', ['if', ['u32-lt', generate(depth - 1, names), 0x80000000],
+      ['inl', 'u32', generate(depth - 1, names)], ['inr', 'u32', generate(depth - 1, names)]],
+      [name, generate(depth - 1, [...names, name])],
+      [name, generate(depth - 1, [...names, name])]];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const x of [0, 1, 99, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  const sum = ['sum', ['product', 'bool', 'u32'], ['sum', 'u32', 'bool']];
+  const value = ['if', ['u32-lt', 'x', 100],
+    ['inl', ['sum', 'u32', 'bool'], ['pair', ['u32-eq', 'x', 0], ['add', 'x', 7]]],
+    ['inr', ['product', 'bool', 'u32'], ['if', ['u32-eq', 'x', 100],
+      ['inl', 'bool', ['add', 'x', 9]], ['inr', 'u32', 'true']]]];
+  const handler = ['fn', ['run', 's', sum], ['case', 'u32', 's',
+    ['p', ['if', ['fst', 'p'], ['snd', 'p'], ['add', ['snd', 'p'], 'x']]],
+    ['s', ['case', 'u32', 's', ['n', ['add', 'n', 'x']], ['b', ['if', 'b', 'x', 91]]]]]];
+  cases.push({ name: `sum-nested-closure-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'proof', ['eq', 'x', 'x']], ['refl', 'x'],
+      ['let', ['run', 'f', ['pi', ['run', 's', sum], 'u32']], handler,
+        ['add', ['app', 'run', 'f', value], ['app', 'run', 'f', value]]]]] });
+  cases.push({ name: `sum-case-result-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['case', 'u32',
+      ['case', ['sum', 'u32', 'bool'], value,
+        ['p', ['inl', 'bool', ['snd', 'p']]], ['s', 's']],
+      ['n', ['add', 'n', 'x']], ['b', ['if', 'b', 19, 23]]]] });
+  cases.push({ name: `sum-case-product-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['snd', ['case', ['product', 'bool', 'u32'], value,
+      ['p', 'p'], ['s', ['pair', 'false', ['add', 'x', 11]]]]]] });
+  cases.push({ name: `sum-case-boolean-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['if', ['case', 'bool', value,
+      ['p', ['fst', 'p']], ['s', ['u32-eq', 'x', 100]]], 17, 29]] });
+  cases.push({ name: `sum-shadow-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['case', 'u32', ['inr', 'u32', ['add', 'x', 3]],
+      ['x', 'x'], ['y', ['let', ['erase', 'p', ['eq', 'y', 'y']], ['refl', 'y'],
+        ['app', 'run', ['fn', ['run', 'z', 'u32'], ['add', 'x', ['add', 'y', 'z']]], 5]]]]] });
+}
+for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  for (const proposed of [0, 1, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
+    for (const ceiling of [0, 100, 0xffffffff]) {
+      const total = spent + proposed;
+      for (const field of [0, 1]) {
+        const status = total > 0xffffffff ? 1 : total > ceiling ? 2 : 0;
+        cases.push({ name: `budget-sum-${spent}-${proposed}-${ceiling}-${field}`,
+          file: 'examples/budget-sum.aw', args: [spent, proposed, ceiling, field],
+          expected: field === 0 ? status : status === 0 ? total : 0 });
+      }
+    }
+  }
+}
 for (const x of [0, 1, 99, 100, 0x80000000, 0xffffffff]) {
   for (const projection of ['fst', 'snd']) {
     cases.push({ name: `product-if-${projection}-${x}`, args: [x], body:
@@ -211,6 +264,11 @@ function additions(count, leaf) {
   return ['add', additions(left, leaf), additions(count - 1 - left, leaf)];
 }
 cases.push({ name: 'local-limit', body: additions(50000, 1), args: [], fuel: '100000000' });
+cases.push({ name: 'sum-case-local-limit', body: ['case', 'u32', ['inr', 'u32', 7],
+  ['x', additions(24999, 'x')], ['y', additions(25000, 'y')]], args: [], fuel: '100000000' });
+cases.push({ name: 'sum-if-local-limit', body: ['case', 'u32', ['if', 'false',
+  ['inl', 'u32', additions(24997, 1)], ['inr', 'u32', additions(24998, 2)]],
+  ['x', 'x'], ['y', 'y']], args: [], fuel: '100000000' });
 cases.push({ name: 'local-limit-with-parameter', body: ['fn', ['run', 'x', 'u32'],
   additions(49999, 'x')], args: [2], fuel: '100000000' });
 cases.push({ name: 'branch-local-limit', body: ['if', ['u32-lt', 1, 2],
@@ -265,6 +323,13 @@ try {
   assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   const malformed = join(scratch, 'malformed.aw');
   for (const body of [['if', 1, 2, 3], ['if', 'true', 1, 'false'],
+    ['inl', 'bool', 7], ['inr', 'u32', 'true'],
+    ['case', 'u32', 1, ['x', 'x'], ['y', 'y']],
+    ['case', 'u32', ['inl', 'bool', 7], ['x', 'x'], ['y', 'y']],
+    ['case', 'u32', ['inr', 'u32', 'true'], ['x', 'false'], ['y', 0]],
+    ['case', 'u32', ['inl', 'u32', 7], ['x', 'x']],
+    ['let', ['erase', 's', ['sum', 'u32', 'u32']], ['inl', 'u32', 7],
+      ['case', 'u32', 's', ['x', 'x'], ['y', 'y']]],
     ['transport', ['x', 'u32'], 1, 2, ['refl', 1], 42],
     ['transport', ['x', 'u32'], 1, 1, ['refl', 2], 42],
     ['transport', ['x', 'u32'], 1, 1, ['refl', 1], 'true'],
@@ -297,6 +362,8 @@ try {
       ['fn', ['run', name, 'u32'], 42],
       ['let', ['erase', name, 'u32'], 1, 42],
       ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
+      ['case', 'u32', ['inl', 'u32', 7], [name, 0], ['y', 'y']],
+      ['case', 'u32', ['inl', 'u32', 7], ['x', 'x'], [name, 0]],
       ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
     ]) {
       writeFileSync(malformed, `(export main ${source(body)})`);
@@ -310,6 +377,10 @@ try {
     }
   }
   for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
+    ['case', 'u32', ['inr', 'u32', 7],
+      ['x', additions(25000, 'x')], ['y', additions(25000, 'y')]],
+    ['case', 'u32', ['if', 'false', ['inl', 'u32', additions(24998, 1)],
+      ['inr', 'u32', additions(24998, 2)]], ['x', 'x'], ['y', 'y']],
     ['snd', ['if', 'false', ['pair', additions(24999, 1), 7],
       ['pair', 11, additions(24999, 2)]]],
     ['fst', ['pair', 42, additions(50001, 1)]],

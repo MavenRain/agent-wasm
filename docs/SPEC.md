@@ -19,11 +19,13 @@ JavaScript currently only hosts the emitted Wasm.
 ```text
 program ::= (export main term)
 rel     ::= run | erase
-type    ::= u32 | bool | (product type type)
+type    ::= u32 | bool | (product type type) | (sum type type)
           | (eq term term) | (pi (rel name type) type)
 term    ::= integer | true | false | name
           | (add term term)
           | (pair term term) | (fst term) | (snd term)
+          | (inl type term) | (inr type term)
+          | (case type term (name term) (name term))
           | (u32-eq term term) | (u32-lt term term) | (u32-le term term)
           | (if term term term)
           | (fn (rel name type) term)
@@ -40,7 +42,7 @@ Integer literals use one or more ASCII decimal digits and range from 0 through
 4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
 rejected. Tokens starting with a digit or sign are reserved for literals and
 cannot be used as binder names in functions, dependent function types, lets,
-or transport families.
+transport families, or case handlers.
 The boolean literals `true` and `false` are also reserved binder names.
 Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
@@ -51,11 +53,12 @@ numbers suitable for unchecked budget arithmetic.
 `bool` is distinct from `u32`. The three comparisons accept u32 operands and
 return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
-two branches of the same type: u32, bool, or nested products of those types. Both branches are
+two branches of the same type: u32, bool, or nested products and sums of those
+types. Both branches are
 checked in the enclosing phase, including an unreachable branch. At runtime
 the condition is evaluated first and only the selected branch executes.
 Function and evidence fields are not supported in conditional results, including
-inside nested products. Internal functions and lets can bind booleans;
+inside nested products and sums. Internal functions and lets can bind booleans;
 the export ABI remains exclusively `u32 -> ... -> u32`.
 
 Conversion reduces closed comparisons and selects a branch when the normalized
@@ -84,8 +87,47 @@ results.
 
 `examples/price-ceiling.aw` returns 1 when an input price is at most 100, else 0.
 It uses no arithmetic on amounts. This is an executable predicate, not yet the
-planned validator returning a sum with erased evidence. Sums, records, dependent
+planned validator returning a sum with erased evidence. Records, dependent
 pairs, and non-wrapping amount operations remain future M1 work.
+
+## M1 internal sums
+
+`(sum A B)` is a non-dependent tagged choice. Both payload types must be built
+from u32, bool, products, and sums, in either phase. Functions and equality
+evidence are excluded, even in an inactive alternative. `(inl B value)` infers
+`(sum A B)` from `value : A`; `(inr A value)` infers it from `value : B`.
+The explicit type describes the other alternative. Injection evaluates its
+payload eagerly and checks it in the enclosing phase.
+
+`(case R value (left a) (right b))` requires `value : (sum A B)` and checks
+both handlers against the explicit result type R, with `left : A` and
+`right : B` bound separately. R is outside the payload binders and must also
+be built from scalar, product, and sum types. Both handlers are checked in
+the enclosing phase, including unreachable handlers. This is non-dependent
+elimination: selecting an alternative does not introduce equality evidence.
+The export ABI still excludes sums and their payloads as structured values.
+
+Conversion normalizes the scrutinee. A known injection substitutes its payload
+into the corresponding handler and normalizes that body. An open scrutinee
+remains a symbolic case with normalized result type and handlers. Mapping and
+substitution traverse each handler under its own binder.
+
+Erasure lowers a sum to `(pair tag (pair left right))`, using tag 1 for left
+and 0 for right. The inactive payload is recursively zero-filled according to
+its finite scalar shape; nested inactive sums use tag 1. No source type or
+evidence remains in the runtime IR. Case lowering binds the scrutinee once,
+then branches on its tag and binds only the selected payload for its handler.
+The extra scrutinee binder is accounted for when remapping outer variables.
+Existing product conditionals select the tag and both payload slots together.
+Only the selected branch's instructions execute. Compilation still expands
+both branches, including inactive storage, under the shared fuel/local limits.
+This representation uses no heap allocation and is internal to this compiler.
+
+`examples/budget-sum.aw` returns an internal `(sum u32 u32)`: left 1 for
+overflow, left 2 for exceeding the ceiling, or right with the accepted total.
+A final case adapts it to the scalar ABI: field 0 returns status, any other
+field returns the successful total or zero on error. Named error variants and
+payloads carrying erased evidence remain future work.
 
 ## M1 product slice
 
@@ -116,7 +158,7 @@ it is not a general object ABI.
 `examples/tool-policy.aw` packages a tool identifier and price as a pair and
 checks the immutable allowlist {7, 9} and price ceiling 100. It returns 1 or 0,
 uses no amount arithmetic, and supplies no host authority or refined evidence.
-Named records, sums, and dependent pairs remain future work.
+Named records and dependent pairs remain future work.
 
 ## M1 budget policy
 

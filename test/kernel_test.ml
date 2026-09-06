@@ -36,6 +36,65 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "sum fixed compilation budget", (fun () ->
+    let source = "(export main (fst (case (product u32 bool) (if true (inl bool (add 1 2)) (inr u32 false)) (x (pair x true)) (b (pair 0 b)))))" in
+    let* artifact = Compiler.compile ~fuel:182 source in
+    let* () = if artifact.steps = 182 then Ok () else Error (Backend "sum budget changed") in
+    Result.fold ~ok:(fun _ -> Error (Backend "sum fuel boundary accepted"))
+      ~error:(function Budget_exhausted -> Ok () | e -> Error e)
+      (Compiler.compile ~fuel:181 source));
+  "sum open branches normalize", (fun () -> accepted
+    "(app run (fn (run s (sum u32 u32)) (let (erase p (eq (case u32 s (x (add 1 2)) (y (add 3 4))) (case u32 s (x 3) (y 7)))) (refl (case u32 s (x 3) (y 7))) 0)) (inl u32 7))");
+  "sum transported shape", (fun () -> accepted
+    "(case u32 (transport (i (sum bool u32)) 0 0 (refl 0) (inr bool 7)) (b (if b 1 2)) (x x))");
+  "sum left", (fun () -> accepted "(case u32 (inl bool 7) (x x) (b (if b 1 2)))");
+  "sum right", (fun () -> accepted "(case u32 (inr u32 true) (x x) (b (if b 1 2)))");
+  "sum closed left conversion", (fun () -> accepted
+    "(let (erase p (eq (case u32 (inl bool 7) (x (add x 1)) (b 99)) 8)) (refl 8) 0)");
+  "sum closed right conversion", (fun () -> accepted
+    "(let (erase p (eq (case u32 (inr u32 true) (x 99) (b (if b 8 9))) 8)) (refl 8) 0)");
+  "sum wrong conversion", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase p (eq (case u32 (inl u32 7) (x x) (y 8)) 8)) (refl 8) 0)");
+  "sum open conversion", (fun () -> accepted
+    "(app run (fn (run s (sum u32 u32)) (let (erase p (eq (case u32 s (x (add x 0)) (y y)) (case u32 s (x (add x 0)) (y y)))) (refl (case u32 s (x (add x 0)) (y y))) 0)) (inl u32 7))");
+  "sum open branches stay distinct", (fun () -> kernel_rejects Type_mismatch
+    "(app run (fn (run s (sum u32 u32)) (let (erase p (eq (case u32 s (x x) (y 1)) (case u32 s (x x) (y 2)))) (refl (case u32 s (x x) (y 1))) 0)) (inl u32 7))");
+  "sum conversion capture", (fun () -> accepted
+    "(fn (run n u32) (let (erase p (eq (app run (fn (run z u32) (case u32 (inr u32 z) (x n) (x (add n x)))) 3) (add n 3))) (refl (add n 3)) 0))");
+  "sum proof erasure", (fun () -> same_output
+    "(let (erase s (sum u32 bool)) (inl bool 7) 42)" "42");
+  "sum runtime ghost capture", (fun () -> kernel_rejects (Erased_use 1)
+    "(let (erase n u32) 7 (case u32 (inl u32 1) (x x) (y n)))");
+  "sum erased scrutinee", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase s (sum u32 bool)) (inl bool 7) (case u32 s (x x) (b 0)))");
+  "sum scalar scrutinee", (fun () -> kernel_rejects Type_mismatch "(case u32 1 (x x) (y y))");
+  "sum left branch mismatch", (fun () -> kernel_rejects Type_mismatch "(case u32 (inr u32 1) (x true) (y y))");
+  "sum right branch mismatch", (fun () -> kernel_rejects Type_mismatch "(case u32 (inl u32 1) (x x) (y false))");
+  "sum annotation mismatch", (fun () -> kernel_rejects Type_mismatch
+    "(let (run s (sum bool u32)) (inl u32 7) 0)");
+  "sum mismatched conditional", (fun () -> kernel_rejects Type_mismatch
+    "(let (run s (sum u32 bool)) (if true (inl bool 7) (inr bool false)) 0)");
+  "sum left evidence type", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase s (sum (eq 0 0) u32)) (inr (eq 0 0) 7) 0)");
+  "sum right evidence type", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase s (sum u32 (eq 0 0))) (inl (eq 0 0) 7) 0)");
+  "sum nested function type", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase s (sum u32 (product bool (pi (run x u32) u32)))) (inl (product bool (pi (run x u32) u32)) 7) 0)");
+  "sum function payload", (fun () -> kernel_rejects Type_mismatch
+    "(let (run s (sum u32 u32)) (inl u32 (fn (run x u32) x)) 0)");
+  "sum case function result", (fun () -> kernel_rejects Type_mismatch
+    "(case (pi (run x u32) u32) (inl u32 1) (a (fn (run x u32) x)) (b (fn (run x u32) x)))");
+  "sum case proof result", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase p (eq 0 0)) (case (eq 0 0) (inl u32 1) (a (refl 0)) (b (refl 0))) 0)");
+  "sum export", (fun () -> kernel_rejects Unsupported_export "(inl bool 7)");
+  "sum parameter export", (fun () -> kernel_rejects Unsupported_export "(fn (run s (sum u32 bool)) 0)");
+  "sum projection", (fun () -> kernel_rejects Type_mismatch "(fst (inl bool 7))");
+  "sum application", (fun () -> kernel_rejects Expected_function "(app run (inl bool 7) 0)");
+  "sum left reserved binder", (fun () -> rejected (Parse "binder name is reserved for literals")
+    "(case u32 (inl u32 1) (true 0) (y y))");
+  "sum right reserved binder", (fun () -> rejected (Parse "binder name is reserved for literals")
+    "(case u32 (inl u32 1) (x x) (5 0))");
+  "sum binder scope", (fun () -> rejected (Unknown_name "x") "(case u32 (inl u32 1) (x x) (y x))");
   "transport family capture avoidance", (fun () ->
     let open Ast in
     let family = Pi (Erased, Eq (Var 0, Var 1), Eq (Var 1, Var 2)) in

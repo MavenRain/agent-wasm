@@ -84,6 +84,10 @@ let rec ty budget names tree =
   match tree with
   | Atom "u32" -> Ok U32
   | Atom "bool" -> Ok Bool
+  | List [Atom "sum"; a; b] ->
+      let* a = ty budget names a in
+      let* b = ty budget names b in
+      Ok (Sum (a, b))
   | List [Atom "product"; a; b] ->
       let* a = ty budget names a in
       let* b = ty budget names b in
@@ -98,7 +102,7 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
       Ok (Pi (r, a, b))
-  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, eq, or pi type")
+  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, sum, eq, or pi type")
 and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -106,6 +110,22 @@ and term budget names tree =
   | Atom "false" -> Ok (Boolean false)
   | Atom name ->
       atom names name
+  | List [Atom "inl"; other; value] ->
+      let* other = ty budget names other in
+      let* value = term budget names value in
+      Ok (Inl (other, value))
+  | List [Atom "inr"; other; value] ->
+      let* other = ty budget names other in
+      let* value = term budget names value in
+      Ok (Inr (other, value))
+  | List [Atom "case"; result; value; List [Atom left; a]; List [Atom right; b]] ->
+      let* () = binder left in
+      let* () = binder right in
+      let* result = ty budget names result in
+      let* value = term budget names value in
+      let* a = term budget (left :: names) a in
+      let* b = term budget (right :: names) b in
+      Ok (Case (result, value, a, b))
   | List [Atom "pair"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in

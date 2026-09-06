@@ -20,7 +20,7 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: add sums, records, and dependent pairs. Represent validation as an
+Next: add records and dependent pairs. Represent validation as an
 executable branch yielding
 either an error or a value with erased evidence. First domain example: a proposed
 tool action checked against an explicit immutable allowlist and price ceiling.
@@ -51,8 +51,14 @@ This does not yet connect executable comparisons to refined evidence.
 Implemented fifth slice: conditionals return nested products of scalar fields.
 The budget-result example returns an internal status/payload pair, distinguishing
 overflow from exceeding a ceiling and retaining the accepted total. Selected
-branch computations execute once, followed by scalar field selection. Sums,
-named records, dependent pairs, and evidence-bearing results remain open.
+branch computations execute once, followed by scalar field selection.
+
+Implemented sixth slice: internal sums with explicit injections and case
+handlers. Payloads and case results support nested scalar products and sums.
+The budget-sum example distinguishes error codes from successful totals using
+the type system, then adapts its result to the integer ABI. Lowering reuses
+products and executable conditionals with a tag and inactive payload storage.
+Named records, dependent pairs, and evidence-bearing results remain open.
 
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported
