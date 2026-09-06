@@ -19,9 +19,11 @@ JavaScript currently only hosts the emitted Wasm.
 ```text
 program ::= (export main term)
 rel     ::= run | erase
-type    ::= u32 | bool | (eq term term) | (pi (rel name type) type)
+type    ::= u32 | bool | (product type type)
+          | (eq term term) | (pi (rel name type) type)
 term    ::= integer | true | false | name
           | (add term term)
+          | (pair term term) | (fst term) | (snd term)
           | (u32-eq term term) | (u32-lt term term) | (u32-le term term)
           | (if term term term)
           | (fn (rel name type) term)
@@ -72,6 +74,37 @@ against the compilation budget even though execution chooses only one.
 It uses no arithmetic on amounts. This is an executable predicate, not yet the
 planned validator returning a sum with erased evidence. Sums, records, dependent
 pairs, transport, and non-wrapping amount operations remain future M1 work.
+
+## M1 product slice
+
+`(product A B)` is a non-dependent pair type. `(pair a b)` infers its two
+component types; `fst` and `snd` require a product and return the corresponding
+component. Components may be scalars, nested products, or internal functions.
+Both components are checked in the enclosing phase, even when only one is
+projected. Runtime products cannot contain equality evidence, including inside
+nested products. Ghost products may contain proofs and disappear when bound
+with `erase`; projecting an erased product at runtime is rejected.
+
+Evaluation constructs pairs eagerly, first the left component, then the right.
+Projection evaluates the whole operand before selecting a field. Conversion
+normalizes both components and reduces projections of normalized pairs.
+Open projections remain symbolic. Product components introduce no binder, so
+indices in either component refer to the same surrounding context. There is no
+pair eta rule and the second component cannot depend on the first.
+
+The erased IR preserves pairs and projections without type or proof data. Static
+expansion represents a pair as two compiler values, retaining scalar instructions
+from both fields in evaluation order, including an unselected field. Pair
+construction and projection consume compilation budget but allocate no Wasm
+object or extra local of their own. Field computations still count toward local
+limits. The integer export ABI and u32-only conditional branches are unchanged.
+This representation relies on static shapes and the pure, terminating fragment;
+it is not a general object ABI.
+
+`examples/tool-policy.aw` packages a tool identifier and price as a pair and
+checks the immutable allowlist {7, 9} and price ceiling 100. It returns 1 or 0,
+uses no amount arithmetic, and supplies no host authority or refined evidence.
+Named records, sums, dependent pairs, and transport remain future work.
 
 ## Checking
 

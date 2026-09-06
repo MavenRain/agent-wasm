@@ -9,12 +9,26 @@ let arity c = c.parameters
 
 let literal = function
   | Lit n -> Some n
-  | Boolean _ | Compare _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> None
+  | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> None
 
 let rec normal budget term =
   let* () = Budget.tick budget in
   match term with
   | Var _ | Lit _ | Boolean _ -> Ok term
+  | Pair (a, b) ->
+      let* a = normal budget a in
+      let* b = normal budget b in
+      Ok (Pair (a, b))
+  | Fst a ->
+      let* a = normal budget a in
+      (match a with
+       | Pair (a, _) -> Ok a
+       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> Ok (Fst a))
+  | Snd a ->
+      let* a = normal budget a in
+      (match a with
+       | Pair (_, b) -> Ok b
+       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> Ok (Snd a))
   | Compare (op, a, b) ->
       let* a = normal budget a in
       let* b = normal budget b in
@@ -25,7 +39,7 @@ let rec normal budget term =
       (match c with
        | Boolean true -> normal budget a
        | Boolean false -> normal budget b
-       | Var _ | Lit _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ ->
+       | Pair _ | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ ->
            let* a = normal budget a in
            let* b = normal budget b in
            Ok (If (c, a, b)))
@@ -43,7 +57,7 @@ let rec normal budget term =
       let* a = normal budget a in
       (match f with
        | Lam (_, _, body) -> let* body = subst_term budget a body in normal budget body
-       | Boolean _ | Compare _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Ann _ -> Ok (App (r, f, a)))
+       | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Ann _ -> Ok (App (r, f, a)))
   | Let (_, _, value, body) ->
       let* value = normal budget value in
       let* body = subst_term budget value body in
@@ -53,6 +67,11 @@ let rec normal budget term =
 and normal_ty budget = function
   | U32 -> let* () = Budget.tick budget in Ok U32
   | Bool -> let* () = Budget.tick budget in Ok Bool
+  | Product (a, b) ->
+      let* () = Budget.tick budget in
+      let* a = normal_ty budget a in
+      let* b = normal_ty budget b in
+      Ok (Product (a, b))
   | Eq (a, b) ->
       let* a = normal budget a in
       let* b = normal budget b in
@@ -68,19 +87,27 @@ let equivalent budget a b =
   if a = b then Ok () else Error Type_mismatch
 
 let argument_phase phase = function Runtime -> phase | Erased -> Ghost
+let rec runtime_type = function
+  | Eq _ -> Error Runtime_proof
+  | U32 | Bool | Pi _ -> Ok ()
+  | Product (a, b) -> let* () = runtime_type a in runtime_type b
+
 let domain_allowed relevance ty =
   match relevance with
   | Erased -> Ok ()
-  | Runtime -> (match ty with Eq _ -> Error Runtime_proof | U32 | Bool | Pi _ -> Ok ())
+  | Runtime -> runtime_type ty
 let result_allowed phase ty =
   match phase with
   | Ghost -> Ok ty
-  | Execute -> (match ty with Eq _ -> Error Runtime_proof | U32 | Bool | Pi _ -> Ok ty)
+  | Execute -> let* () = runtime_type ty in Ok ty
 
 let rec well_formed budget context ty =
   let* () = Budget.tick budget in
   match ty with
   | U32 | Bool -> Ok ()
+  | Product (a, b) ->
+      let* () = well_formed budget context a in
+      well_formed budget context b
   | Eq (a, b) ->
       let* () = check_term budget Ghost context a U32 in
       check_term budget Ghost context b U32
@@ -99,6 +126,16 @@ and infer budget phase context term =
         else shift_ty budget (k + 1) b.ty
   | Lit n -> if n < 0L || n > mask then Error (Invalid_u32 n) else Ok U32
   | Boolean _ -> Ok Bool
+  | Pair (a, b) ->
+      let* a = infer budget phase context a in
+      let* b = infer budget phase context b in
+      Ok (Product (a, b))
+  | Fst a ->
+      let* ty = infer budget phase context a in
+      (match ty with Product (a, _) -> Ok a | U32 | Bool | Eq _ | Pi _ -> Error Type_mismatch)
+  | Snd a ->
+      let* ty = infer budget phase context a in
+      (match ty with Product (_, b) -> Ok b | U32 | Bool | Eq _ | Pi _ -> Error Type_mismatch)
   | Compare (_, a, b) ->
       let* () = check_term budget phase context a U32 in
       let* () = check_term budget phase context b U32 in
@@ -125,7 +162,7 @@ and infer budget phase context term =
            else
              let* () = check_term budget (argument_phase phase r) context a domain in
              subst_ty budget a range
-       | U32 | Bool | Eq _ -> Error Expected_function)
+       | U32 | Bool | Product _ | Eq _ -> Error Expected_function)
   | Let (r, a, value, body) ->
       let* () = well_formed budget context a in
       let* () = check_term budget (argument_phase phase r) context value a in
@@ -148,7 +185,7 @@ let check budget source =
   let rec export_arity count = function
     | U32 -> Ok count
     | Pi (Runtime, U32, rest) -> export_arity (count + 1) rest
-    | Bool | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Bool | Eq _ | Pi _), _) -> Error Unsupported_export
+    | Bool | Product _ | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Bool | Product _ | Eq _ | Pi _), _) -> Error Unsupported_export
   in
   let* parameters = export_arity 0 ty in
   Ok { source; parameters }

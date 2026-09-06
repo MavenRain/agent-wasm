@@ -6,7 +6,7 @@ is a working name. The intended applications are private inference clients,
 constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
-arithmetic, booleans, unsigned comparisons, conditional branches, dependent
+arithmetic, booleans, unsigned comparisons, conditional branches, pairs, dependent
 function types, erased arguments, and equality evidence.
 It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
 cryptography, or persistence. Proof checking and erasure are tested, not formally
@@ -77,6 +77,21 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 
 Comparisons produce internal booleans and `if` selects a u32 branch. Sums and
 validators returning values with erased evidence remain on the M1 roadmap.
+
+This slice adds `(product A B)`, `(pair a b)`, `fst`, and `snd` for internal
+data. `examples/tool-policy.aw` packages a tool ID and price, then checks IDs 7
+and 9 against a price ceiling of 100:
+
+```sh
+_build/default/bin/main.exe compile examples/tool-policy.aw artifacts/tool-policy.wasm
+node scripts/run.mjs artifacts/tool-policy.wasm 7 100
+# 1
+node scripts/run.mjs artifacts/tool-policy.wasm 8 100
+# 0
+```
+
+Both pair fields evaluate eagerly. The public ABI still accepts and returns
+integers; this example returns a decision without granting host authority.
 
 ## Validate
 

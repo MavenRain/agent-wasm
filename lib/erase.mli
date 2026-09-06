@@ -5,6 +5,9 @@ type term =
   | Local of int
   | Const of int64
   | Add of term * term
+  | Pair of term * term
+  | Fst of term
+  | Snd of term
   | Compare of comparison * term * term
   | If of term * term * term
   | Fn of term

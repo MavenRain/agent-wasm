@@ -26,6 +26,13 @@ either an error or a value with erased evidence. First domain example: a propose
 tool action checked against an explicit immutable allowlist and price ceiling.
 Amounts need non-wrapping arithmetic or explicit overflow errors.
 
+Implemented second slice: non-dependent products, eager pairs, and projections,
+including nested products and internal function fields. Static expansion retains
+both fields' runtime computations without introducing an object ABI. The
+tool-policy example packages a proposed action and checks immutable tool IDs
+and a price ceiling, returning an integer decision. Evidence-bearing validation
+and named records remain open.
+
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported
 fragment before calling it verified. Use adversarial examples and an independent

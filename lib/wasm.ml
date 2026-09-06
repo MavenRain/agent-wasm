@@ -7,7 +7,7 @@ type expression =
   | Compare of Erase.comparison * scalar * scalar
   | If of scalar * branch * branch
 and branch = { bindings : (int * expression) list; result : scalar }
-type value = Scalar of scalar | Closure of value list * Erase.term
+type value = Scalar of scalar | Closure of value list * Erase.term | Pair of value * value
 type state = { next : int; bindings : (int * expression) list }
 
 (* A compiler portability limit, counting parameters and generated locals. *)
@@ -27,6 +27,7 @@ let bind state expression =
 let as_scalar = function
   | Scalar s -> Ok s
   | Closure _ -> Error (Backend "function used as a scalar")
+  | Pair _ -> Error (Backend "pair used as a scalar")
 
 (* Static closure expansion is deliberately limited to this pure, finite slice.
    Scalar operations stay executable and each receives a Wasm local. *)
@@ -37,6 +38,20 @@ let rec evaluate budget state scope term =
       let* value = Option.to_result ~none:(Invalid_index k) (List.nth_opt scope k) in
       Ok (value, state)
   | Erase.Const n -> Ok (Scalar (Const n), state)
+  | Erase.Pair (a, b) ->
+      let* a, state = evaluate budget state scope a in
+      let* b, state = evaluate budget state scope b in
+      Ok (Pair (a, b), state)
+  | Erase.Fst a ->
+      let* a, state = evaluate budget state scope a in
+      (match a with
+       | Pair (a, _) -> Ok (a, state)
+       | Scalar _ | Closure _ -> Error (Backend "projection of non-pair"))
+  | Erase.Snd a ->
+      let* a, state = evaluate budget state scope a in
+      (match a with
+       | Pair (_, b) -> Ok (b, state)
+       | Scalar _ | Closure _ -> Error (Backend "projection of non-pair"))
   | Erase.Add (a, b) ->
       let* a, state = evaluate budget state scope a in
       let* a = as_scalar a in
@@ -71,7 +86,7 @@ let rec evaluate budget state scope term =
 and apply budget state f a =
   let* () = Budget.tick budget in
   match f with
-  | Scalar _ -> Error Expected_function
+  | Scalar _ | Pair _ -> Error Expected_function
   | Closure (scope, body) -> evaluate budget state (a :: scope) body
 
 let byte = Buffer.add_uint8

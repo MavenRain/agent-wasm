@@ -9,6 +9,12 @@ let rejected expected body =
     ~error:(fun actual -> if actual = expected then Ok () else Error actual)
     (compile body)
 
+let kernel_rejects expected body =
+  Result.fold
+    ~ok:(fun _checked -> Error (Backend "unexpected acceptance"))
+    ~error:(fun actual -> if actual = expected then Ok () else Error actual)
+    (Compiler.check ("(export main " ^ body ^ ")"))
+
 let same_output a b =
   let* a = compile a in
   let* b = compile b in
@@ -30,6 +36,58 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "strict comparison equal conversion", (fun () -> accepted
+    "(let (erase p (eq (if (u32-lt 5 5) 1 2) 2)) (refl 2) 0)");
+  "inclusive comparison equal conversion", (fun () -> accepted
+    "(let (erase p (eq (if (u32-le 5 5) 1 2) 1)) (refl 1) 0)");
+  "pair projections", (fun () -> accepted
+    "(let (run p (product u32 bool)) (pair 42 true) (if (snd p) (fst p) 0))");
+  "pair export", (fun () -> rejected Unsupported_export "(pair 1 2)");
+  "pair parameter export", (fun () -> rejected Unsupported_export
+    "(fn (run p (product u32 u32)) (fst p))");
+  "scalar fst", (fun () -> rejected Type_mismatch "(fst 1)");
+  "scalar snd", (fun () -> rejected Type_mismatch "(snd true)");
+  "pair mismatch", (fun () -> rejected Type_mismatch
+    "(let (run p (product u32 bool)) (pair true 1) 0)");
+  "pair called", (fun () -> rejected Expected_function "(app run (pair 1 2) 0)");
+  "pair branch", (fun () -> rejected Type_mismatch "(if true (pair 1 2) 0)");
+  "unselected field checked", (fun () -> rejected Type_mismatch "(fst (pair 1 (add true 2)))");
+  "unselected erased field", (fun () -> rejected (Erased_use 0)
+    "(let (erase x u32) 2 (fst (pair 1 x)))");
+  "erased pair use", (fun () -> rejected (Erased_use 0)
+    "(let (erase p (product u32 u32)) (pair 1 2) (fst p))");
+  "pair runtime proof", (fun () -> rejected Runtime_proof "(fst (pair 1 (refl 2)))");
+  "nested runtime proof domain", (fun () -> rejected Runtime_proof
+    "(app erase (fn (erase f (pi (run p (product u32 (product u32 (eq 1 1)))) u32)) 0) (fn (run p (product u32 (product u32 (eq 1 1)))) 0))");
+  "ghost proof pair", (fun () -> same_output
+    "(let (erase p (product u32 (eq 2 2))) (pair 1 (refl 2)) 42)" "42");
+  "ghost proof projection", (fun () -> accepted
+    "(let (erase p (eq 2 2)) (snd (pair 1 (refl 2))) 42)");
+  "pair conversion", (fun () -> accepted
+    "(let (erase p (eq (add (fst (pair 3 4)) (snd (pair 5 6))) 9)) (refl 9) 0)");
+  "pair conversion mismatch", (fun () -> rejected Type_mismatch
+    "(let (erase p (eq (snd (pair 3 4)) 3)) (refl 3) 0)");
+  "dependent pair argument substitution", (fun () -> accepted
+    "(app erase (app run (fn (run p (product u32 u32)) (fn (erase e (eq (fst p) 7)) (snd p))) (pair 7 42)) (refl 7))");
+  "product type index substitution", (fun () -> accepted
+    "(app erase (app run (fn (run x u32) (fn (erase p (product (eq x x) (eq x 7))) 42)) 7) (pair (refl 7) (refl 7)))");
+  "product type index mismatch", (fun () -> rejected Type_mismatch
+    "(app erase (app run (fn (run x u32) (fn (erase p (product (eq x x) (eq x 7))) 42)) 8) (pair (refl 8) (refl 8)))");
+  "pair binder capture", (fun () -> accepted
+    "(fn (run x u32) (app erase (app run (fn (run p (product u32 u32)) (fn (erase e (eq (fst p) x)) (snd p))) (pair x 42)) (refl x)))");
+  "runtime proof in the first product component", (fun () -> rejected Runtime_proof
+    "(fn (run p (product (eq 1 1) u32)) 0)");
+  "open projections stay distinct", (fun () -> rejected Type_mismatch
+    "(app erase (fn (erase f (pi (run p (product u32 u32)) u32)) 0) (fn (run p (product u32 u32)) (app erase (fn (erase e (eq (fst p) (snd p))) 0) (refl (fst p)))))");
+  "cross projections stay distinct", (fun () -> rejected Type_mismatch
+    "(app erase (fn (erase f (pi (run p (product (product u32 u32) (product u32 u32))) u32)) 0) (fn (run p (product (product u32 u32) (product u32 u32))) (app erase (fn (erase e (eq (fst (snd p)) (snd (fst p)))) 0) (refl (snd (fst p))))))");
+  "open projection reflexive", (fun () -> accepted
+    "(app erase (fn (erase f (pi (run p (product u32 u32)) u32)) 0) (fn (run p (product u32 u32)) (app erase (fn (erase e (eq (fst p) (fst p))) 0) (refl (fst p)))))");
+  "unselected erased field rejected by the kernel", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase x u32) 2 (fst (pair 1 x)))");
+  "pair erasure remapping", (fun () -> same_output
+    "(fn (run x u32) (let (erase e (eq x x)) (refl x) (fst (pair x 2))))"
+    "(fn (run x u32) (fst (pair x 2)))");
   "boolean let and application", (fun () -> accepted
     "(app run (fn (run b bool) (if b 10 20)) true)");
   "boolean export", (fun () -> rejected Unsupported_export "true");

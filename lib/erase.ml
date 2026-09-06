@@ -6,6 +6,9 @@ type term =
   | Local of int
   | Const of int64
   | Add of term * term
+  | Pair of term * term
+  | Fst of term
+  | Snd of term
   | Compare of comparison * term * term
   | If of term * term * term
   | Fn of term
@@ -24,6 +27,12 @@ let run budget checked =
         Ok (Local (depth - level - 1))
     | Ast.Lit n -> Ok (Const n)
     | Ast.Boolean b -> Ok (Const (if b then 1L else 0L))
+    | Ast.Pair (a, b) ->
+        let* a = walk scope depth a in
+        let* b = walk scope depth b in
+        Ok (Pair (a, b))
+    | Ast.Fst a -> Result.map (fun a -> Fst a) (walk scope depth a)
+    | Ast.Snd a -> Result.map (fun a -> Snd a) (walk scope depth a)
     | Ast.Compare (op, a, b) ->
         let op = match op with Ast.Equal -> Equal | Ast.Less -> Less | Ast.Less_equal -> Less_equal in
         let* a = walk scope depth a in
@@ -62,6 +71,9 @@ let dump program =
     | Local n -> "v" ^ string_of_int n
     | Const n -> Int64.to_string n
     | Add (a, b) -> "(add " ^ term a ^ " " ^ term b ^ ")"
+    | Pair (a, b) -> "(pair " ^ term a ^ " " ^ term b ^ ")"
+    | Fst a -> "(fst " ^ term a ^ ")"
+    | Snd a -> "(snd " ^ term a ^ ")"
     | Compare (op, a, b) ->
         let name = match op with Equal -> "u32-eq" | Less -> "u32-lt" | Less_equal -> "u32-le" in
         "(" ^ name ^ " " ^ term a ^ " " ^ term b ^ ")"

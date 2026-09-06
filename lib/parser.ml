@@ -84,6 +84,10 @@ let rec ty budget names tree =
   match tree with
   | Atom "u32" -> Ok U32
   | Atom "bool" -> Ok Bool
+  | List [Atom "product"; a; b] ->
+      let* a = ty budget names a in
+      let* b = ty budget names b in
+      Ok (Product (a, b))
   | List [Atom "eq"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in
@@ -94,7 +98,7 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
       Ok (Pi (r, a, b))
-  | Atom _ | List _ -> Error (Parse "expected u32, bool, eq, or pi type")
+  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, eq, or pi type")
 and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -102,6 +106,12 @@ and term budget names tree =
   | Atom "false" -> Ok (Boolean false)
   | Atom name ->
       atom names name
+  | List [Atom "pair"; a; b] ->
+      let* a = term budget names a in
+      let* b = term budget names b in
+      Ok (Pair (a, b))
+  | List [Atom "fst"; a] -> Result.map (fun a -> Fst a) (term budget names a)
+  | List [Atom "snd"; a] -> Result.map (fun a -> Snd a) (term budget names a)
   | List [Atom ("u32-eq" | "u32-lt" | "u32-le" as op); a; b] ->
       let op = if op = "u32-eq" then Equal else if op = "u32-lt" then Less else Less_equal in
       let* a = term budget names a in

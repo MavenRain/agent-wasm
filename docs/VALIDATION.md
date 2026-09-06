@@ -128,6 +128,43 @@ at 256 leaves. This single run does not isolate compiler changes from machine
 variation and is not a performance gate. It measures the existing arithmetic
 corpus, not validator application performance.
 
+## M1 product slice, 2026-09-06
+
+Validated in an isolated workspace copy with the same OCaml toolchain:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 84 cases, 0 failures
+  e2e: 218 programs, 436 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny <absolute-lib> <absolute-bin> <absolute-test>
+  no obligations at or above medium in 14 files
+```
+
+The 29 new kernel cases cover products, projections, type mismatch, export
+restrictions, nested proof-field rejection, ghost proof products, projection
+conversion, dependent argument substitution, product type indices, capture,
+and erased index remapping. Two cases distinguish strict from inclusive
+comparison at equal operands during conversion, closing the scalar review gap.
+One case puts evidence in the first component of a runtime product domain.
+Three cases keep open projections symbolic: a proof of `(eq (fst p) (snd p))`
+by `(refl (fst p))` is rejected, a proof of `(eq (fst (snd p)) (snd (fst p)))`
+by `(refl (snd (fst p)))` is rejected, and the reflexive form is accepted. One case
+calls the checker without erasure, so the enclosing-phase rule on an
+unselected field is pinned by the kernel alone.
+
+The independent interpreter and deterministic generator now include pairs and
+projections. Directed programs exercise both projections, state retained across
+both fields, branch-local pairs, closure fields with captured computations,
+pair arguments and results, nesting, booleans, and work before entry parameters.
+Five cases compile the actual tool-policy example and compare both hosts with
+a separate scalar policy oracle, including allowlist misses, the exact ceiling,
+one above the ceiling, and maximum u32. Rejections retain existing output and
+create no new output. Backend limit tests count work in unselected fields and
+across both fields of a pair. No new performance measurement or mechanized
+preservation claim accompanies this slice.
+
 ## Initial performance evidence
 
 Command: `opam exec -- python3 -P scripts/bench.py`.

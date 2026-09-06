@@ -20,6 +20,9 @@ function interpret(tree, env = new Map()) {
     return env.get(tree);
   }
   switch (tree[0]) {
+    case 'pair': return [interpret(tree[1], env), interpret(tree[2], env)];
+    case 'fst': return interpret(tree[1], env)[0];
+    case 'snd': return interpret(tree[1], env)[1];
     case 'u32-eq': return interpret(tree[1], env) === interpret(tree[2], env);
     case 'u32-lt': return interpret(tree[1], env) < interpret(tree[2], env);
     case 'u32-le': return interpret(tree[1], env) <= interpret(tree[2], env);
@@ -40,7 +43,7 @@ let fresh = 0;
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(6)) {
+  switch (random(7)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -52,11 +55,45 @@ function generate(depth, names) {
     case 5: return ['if', [['u32-eq', 'u32-lt', 'u32-le'][random(3)],
       generate(depth - 1, names), generate(depth - 1, names)],
       generate(depth - 1, names), generate(depth - 1, names)];
+    case 6: return [random(2) ? 'fst' : 'snd', ['pair',
+      generate(depth - 1, names), generate(depth - 1, names)]];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const args of [[7, 100], [9, 0], [7, 101], [8, 50], [9, 0xffffffff]]) {
+  cases.push({ name: `tool-policy-${args.join('-')}`, file: 'examples/tool-policy.aw',
+    body: ['fn', ['run', 'tool', 'u32'], ['fn', ['run', 'price', 'u32'],
+      ['if', ['u32-le', 'price', 100], ['if', ['u32-eq', 'tool', 7], 1,
+        ['if', ['u32-eq', 'tool', 9], 1, 0]], 0]]], args });
+}
+for (const projection of ['fst', 'snd']) {
+  cases.push({ name: `pair-${projection}`, body: ['fn', ['run', 'x', 'u32'],
+    [projection, ['pair', ['add', 'x', 3], ['add', 'x', 17]]]], args: [20] });
+  cases.push({ name: `pair-${projection}-state`, body:
+    ['let', ['run', 'p', ['product', 'u32', 'u32']],
+      ['pair', ['add', 10, 20], ['add', 30, 40]],
+      ['add', [projection, 'p'], ['add', ['fst', 'p'], ['snd', 'p']]]], args: [] });
+  cases.push({ name: `pair-${projection}-branch`, body: ['fn', ['run', 'x', 'u32'],
+    ['if', ['u32-lt', 'x', 10], [projection, ['pair', ['add', 'x', 1], ['add', 'x', 2]]],
+      [projection, ['pair', ['add', 'x', 3], ['add', 'x', 4]]]]], args: [20] });
+  cases.push({ name: `pair-${projection}-closure`, body:
+    ['app', 'run', [projection, ['pair',
+      ['let', ['run', 'x', 'u32'], ['add', 10, 20], ['fn', ['run', 'y', 'u32'], ['add', 'x', 'y']]],
+      ['let', ['run', 'x', 'u32'], ['add', 30, 40], ['fn', ['run', 'y', 'u32'], ['add', 'x', 'y']]]]], 5], args: [] });
+}
+cases.push({ name: 'pair-argument-result', body:
+  ['snd', ['app', 'run', ['fn', ['run', 'p', ['product', 'u32', 'u32']],
+    ['pair', ['snd', 'p'], ['fst', 'p']]], ['pair', 19, 23]]], args: [] });
+cases.push({ name: 'nested-pair', body:
+  ['fst', ['snd', ['pair', 1, ['pair', 42, 3]]]], args: [] });
+cases.push({ name: 'pair-boolean', body:
+  ['let', ['run', 'p', ['product', 'bool', 'u32']], ['pair', ['u32-lt', 1, 2], 42],
+    ['if', ['fst', 'p'], ['snd', 'p'], 0]], args: [] });
+cases.push({ name: 'pair-before-parameters', body:
+  ['snd', ['pair', ['add', 1, 2], ['let', ['run', 'x', 'u32'], ['add', 3, 4],
+    ['fn', ['run', 'y', 'u32'], ['add', 'x', 'y']]]]], args: [35] });
 for (const op of ['u32-eq', 'u32-lt', 'u32-le']) {
   for (const a of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
     for (const b of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
@@ -124,7 +161,7 @@ try {
   for (const test of cases) {
     const input = join(scratch, `${test.name}.aw`);
     const output = join(scratch, `${test.name}.wasm`);
-    writeFileSync(input, `(export main ${source(test.body)})\n`);
+    writeFileSync(input, test.file ? readFileSync(test.file) : `(export main ${source(test.body)})\n`);
     run(compiler, [...(test.fuel ? ['--fuel', test.fuel] : []), 'compile', input, output]);
     const bytes = readFileSync(output);
     assert(WebAssembly.validate(bytes), `${test.name}: invalid binary`);
@@ -160,6 +197,8 @@ try {
   assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   const malformed = join(scratch, 'malformed.aw');
   for (const body of [['if', 1, 2, 3], ['if', 'true', 1, 'false'],
+    ['fst', 1], ['pair', 1, 2], ['fst', ['pair', 1, ['refl', 2]]],
+    ['let', ['erase', 'p', ['product', 'u32', 'u32']], ['pair', 1, 2], ['snd', 'p']],
     ['let', ['erase', 'b', 'bool'], 'true', ['if', 'b', 1, 0]]]) {
     writeFileSync(malformed, `(export main ${source(body)})`);
     const absent = join(scratch, 'invalid-condition.wasm');
@@ -197,6 +236,8 @@ try {
     }
   }
   for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
+    ['fst', ['pair', 42, additions(50001, 1)]],
+    ['snd', ['pair', additions(25000, 1), additions(25001, 2)]],
     additions(65535, 1), ['if', ['u32-lt', 1, 2], additions(25000, 1), additions(24999, 2)]]) {
     writeFileSync(malformed, `(export main ${source(body)})`);
     for (const target of [output, join(scratch, 'over-limit.wasm')]) {
