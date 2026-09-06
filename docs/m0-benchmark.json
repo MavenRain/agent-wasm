@@ -1,0 +1,168 @@
+{
+  "status": "informational; no OCaml-speed acceptance claim",
+  "method": "fresh compiler processes and fresh outputs; one warmup; warm OS caches; no linking or host JIT timing",
+  "comparison": "core Wasm module emission versus OCaml native object emission; different backends",
+  "platform": "macOS-26.4-arm64-arm-64bit-Mach-O",
+  "machine": "arm64",
+  "cpu_count": 12,
+  "ocamlopt": "5.2.1",
+  "compiler_sha256": "293e03f915621613fa01d969d281625a54049443d9acad895357457ee235ce54",
+  "corpora": [
+    {
+      "leaves": 32,
+      "runtime_additions": 63,
+      "source_sha256": {
+        "plain.aw": "56fb2c2d7c79482ff7ced4f9ae77811d2b2751ab6712ac50f060da17e853d4b9",
+        "proof.aw": "87b18d8b50ff42eebe4e4cb03da88603f7ddeb0faef7200c5a806067a6af85d1",
+        "baseline.ml": "bb2b886b26d96b4ed09c66a515a39aaed6ef19cfff2d50f3fb4c7a5731a65bc7"
+      },
+      "plain": {
+        "median_ms": 5.029292,
+        "samples_ms": [
+          4.590583,
+          5.029292,
+          5.279125,
+          4.92025,
+          4.762,
+          5.365042,
+          5.903042
+        ],
+        "source_bytes": 559,
+        "wasm_bytes": 483,
+        "ratio_to_ocaml": 0.12157359554510977
+      },
+      "proof": {
+        "median_ms": 4.645166,
+        "samples_ms": [
+          4.771084,
+          4.744333,
+          4.694292,
+          4.414916,
+          4.255791,
+          4.645166,
+          4.26375
+        ],
+        "source_bytes": 1701,
+        "wasm_bytes": 483,
+        "ratio_to_ocaml": 0.11228807802845715
+      },
+      "ocaml": {
+        "median_ms": 41.368292,
+        "samples_ms": [
+          41.086792,
+          41.50275,
+          42.056916,
+          41.368292,
+          40.819083,
+          40.263084,
+          41.800958
+        ],
+        "source_bytes": 969
+      }
+    },
+    {
+      "leaves": 256,
+      "runtime_additions": 511,
+      "source_sha256": {
+        "plain.aw": "8944b7a8f2032820c1ba89fa7ca56231df92a9c9d69cdfcb0777984bf157e811",
+        "proof.aw": "c5373d8a77dcd078310ebc17d584e9892a3561aee5ec4fdda5368aaef4e69109",
+        "baseline.ml": "6fdc017b3003a2900d4733093e426ecc00d0f1e838a02098362f214573d2c742"
+      },
+      "plain": {
+        "median_ms": 5.33175,
+        "samples_ms": [
+          9.051208,
+          6.177833,
+          5.065125,
+          5.33175,
+          4.999333,
+          5.399792,
+          5.178167
+        ],
+        "source_bytes": 4523,
+        "wasm_bytes": 4580,
+        "ratio_to_ocaml": 0.10881187291973252
+      },
+      "proof": {
+        "median_ms": 5.396125,
+        "samples_ms": [
+          5.396125,
+          5.646833,
+          5.525375,
+          5.371083,
+          5.500834,
+          5.294625,
+          5.274
+        ],
+        "source_bytes": 13885,
+        "wasm_bytes": 4580,
+        "ratio_to_ocaml": 0.1101256562590128
+      },
+      "ocaml": {
+        "median_ms": 48.999708,
+        "samples_ms": [
+          49.793083,
+          47.531459,
+          48.999708,
+          49.010583,
+          48.093958,
+          50.456542,
+          47.897458
+        ],
+        "source_bytes": 7845
+      }
+    },
+    {
+      "leaves": 1024,
+      "runtime_additions": 2047,
+      "source_sha256": {
+        "plain.aw": "d034ca90e355772b6d96e60ee412bbfc85106d9d237530616f46d00a524aa975",
+        "proof.aw": "6f94bb2f6e30a2295e69211078575260188e8b77b556d4a7b6e65d2ee591a98a",
+        "baseline.ml": "51413b760780d2ceda46b052eb64805f07f8b49b9c009af90aba793a19bd6926"
+      },
+      "plain": {
+        "median_ms": 7.471125,
+        "samples_ms": [
+          7.471125,
+          7.232875,
+          7.998833,
+          7.419333,
+          7.932167,
+          7.57125,
+          6.862416
+        ],
+        "source_bytes": 18371,
+        "wasm_bytes": 19174,
+        "ratio_to_ocaml": 0.09279339617178933
+      },
+      "proof": {
+        "median_ms": 11.637042,
+        "samples_ms": [
+          9.895875,
+          10.078792,
+          10.95775,
+          12.420209,
+          17.303042,
+          14.194125,
+          11.637042
+        ],
+        "source_bytes": 56173,
+        "wasm_bytes": 19174,
+        "ratio_to_ocaml": 0.1445352137159734
+      },
+      "ocaml": {
+        "median_ms": 80.513542,
+        "samples_ms": [
+          80.513542,
+          80.436708,
+          80.253458,
+          82.400667,
+          82.654666,
+          79.641291,
+          260.006042
+        ],
+        "source_bytes": 31677
+      }
+    }
+  ]
+}

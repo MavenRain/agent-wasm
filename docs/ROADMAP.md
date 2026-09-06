@@ -1,0 +1,56 @@
+# Roadmap
+
+## M0: checked erasure to executable Wasm
+
+Implemented: explicit dependent core, quantity-zero arguments, equality evidence,
+shared checking budget, proof-free runtime IR, direct integer Wasm emission,
+CLI, rejection tests, differential host execution, and an informational OCaml
+comparison harness. The name and surface syntax remain provisional.
+
+## M1: dependent data and executable validation
+
+Add sums, records, booleans, comparisons, dependent pairs, and equality transport
+with a precise erasure rule. Represent validation as an executable branch yielding
+either an error or a value with erased evidence. First domain example: a proposed
+tool action checked against an explicit immutable allowlist and price ceiling.
+Amounts need non-wrapping arithmetic or explicit overflow errors.
+
+Write small-step or evaluation semantics, typing rules, and an erasure relation.
+Establish substitution, preservation, and erasure simulation for the supported
+fragment before calling it verified. Use adversarial examples and an independent
+reference semantics alongside mechanization.
+
+## M2: host boundary and ML surface
+
+Add an ergonomic surface over the checked core, stable module interfaces, typed
+errors, and explicit effects. Introduce host imports through declared capabilities,
+with typed HTTP/JSON bindings and a mock inference provider first. Version schemas
+and preserve runtime validation of remote responses.
+
+Choose the WasmGC object representation and the host resource ABI together. Keep
+Wasm imports small and explicit. Add real closures and direct function calls so
+the development compiler does not depend on whole-program static expansion.
+
+## M3: controlled agent execution
+
+Add affine resources, structured concurrency, cancellation, protocol states,
+secret labels, and controlled disclosure. Cover logging and implicit information
+flows. Wire typed inference and MCP clients through explicit host authority.
+The first acceptance application is a private proxy with a constrained tool agent.
+
+## M4: durable resources and representative speed gates
+
+Add reservation and reconciliation libraries, durable workflow state, idempotency,
+and explicit remote protocol assumptions. Validate budgets, revocation, freshness,
+and payment state at runtime. Add a streaming media pipeline as another corpus.
+
+Make OCaml-speed compilation a measured gate over representative applications:
+clean builds including fresh proof checking, implementation edits, proof-only
+edits, and contract edits. Pin compiler versions, machine, parallelism, output
+targets, cache state, and full samples. Opaque module interfaces, bounded proof
+automation, and checked artifact reuse are intended mechanisms, not established
+performance claims. Runtime throughput and output size must also be recorded.
+
+Application work does not wait until M4 to measure performance. The M0 harness
+runs now, and each milestone expands its corpus and reports regressions. M4's
+gate replaces the toy comparison with the workloads named above.
