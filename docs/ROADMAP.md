@@ -14,7 +14,13 @@ Backend expansion threads immutable state explicitly through eager evaluation.
 
 ## M1: dependent data and executable validation
 
-Add sums, records, booleans, comparisons, dependent pairs, and equality transport
+Implemented first slice: internal booleans, unsigned u32 comparisons, and u32
+conditionals with executable Wasm branches. The price-ceiling example returns
+an integer decision. The existing integer export ABI remains unchanged. Closed
+comparisons and conditionals participate in definitional conversion. Directed
+and generated programs are checked against an independent interpreter on both hosts.
+
+Next: add sums, records, dependent pairs, and equality transport
 with a precise erasure rule. Represent validation as an executable branch yielding
 either an error or a value with erased evidence. First domain example: a proposed
 tool action checked against an explicit immutable allowlist and price ceiling.

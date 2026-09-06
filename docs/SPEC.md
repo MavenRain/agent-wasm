@@ -1,4 +1,4 @@
-# M0 compiler specification
+# Compiler specification
 
 ## Accepted direction
 
@@ -19,9 +19,11 @@ JavaScript currently only hosts the emitted Wasm.
 ```text
 program ::= (export main term)
 rel     ::= run | erase
-type    ::= u32 | (eq term term) | (pi (rel name type) type)
-term    ::= integer | name
+type    ::= u32 | bool | (eq term term) | (pi (rel name type) type)
+term    ::= integer | true | false | name
           | (add term term)
+          | (u32-eq term term) | (u32-lt term term) | (u32-le term term)
+          | (if term term term)
           | (fn (rel name type) term)
           | (app rel term term)
           | (let (rel name type) term term)
@@ -35,9 +37,41 @@ Integer literals use one or more ASCII decimal digits and range from 0 through
 4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
 rejected. Tokens starting with a digit or sign are reserved for literals and
 cannot be used as binder names in functions, products, or lets.
+The boolean literals `true` and `false` are also reserved binder names.
 Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
 numbers suitable for unchecked budget arithmetic.
+
+## M1 scalar validation slice
+
+`bool` is distinct from `u32`. The three comparisons accept u32 operands and
+return bool, using unsigned equality, less-than, and less-than-or-equal. There
+are no implicit integer/boolean conversions. `if` requires a bool condition and
+two u32 branches. Both branches are checked in the enclosing phase, including
+an unreachable branch. At runtime the condition is evaluated first and only
+the selected branch executes. Function-valued and boolean-valued branches are
+not supported in this slice. Internal functions and lets can bind booleans;
+the export ABI remains exclusively `u32 -> ... -> u32`.
+
+Conversion reduces closed comparisons and selects a branch when the normalized
+condition is a boolean literal. For an open condition it normalizes both branches
+without equating them or using an arithmetic solver. Equality evidence remains
+indexed exclusively by u32 terms, which may now contain conditionals. A comparison
+does not itself construct equality evidence or refine the checking context.
+
+Erasure lowers boolean literals to canonical i32 values 0 and 1, preserves runtime
+comparisons and conditions, and deletes erased boolean bindings in the same way
+as other ghost values. Code generation emits `i32.eq`, `i32.lt_u`, `i32.le_u`, and
+result-valued Wasm `if`/`else` blocks. Each comparison and conditional receives a
+local, as does addition. Locals from both branches count toward the combined
+50,000 limit and have distinct indices; their instructions remain inside their
+respective branches. Static expansion and serialization charge both branches
+against the compilation budget even though execution chooses only one.
+
+`examples/price-ceiling.aw` returns 1 when an input price is at most 100, else 0.
+It uses no arithmetic on amounts. This is an executable predicate, not yet the
+planned validator returning a sum with erased evidence. Sums, records, dependent
+pairs, transport, and non-wrapping amount operations remain future M1 work.
 
 ## Checking
 
@@ -73,8 +107,8 @@ statically expandable fragment. Higher-order exports are rejected.
 ## Erasure and code generation
 
 Only an abstract `Kernel.checked` value can enter the erasure API. The erased
-program type is private and contains only constants, locals, addition, functions,
-calls, and lets. It has no source type or proof constructors.
+program type is private and contains only constants, locals, addition, comparisons,
+conditionals, functions, calls, and lets. It has no source type or proof constructors.
 
 Erasure deletes erased binders and their values or arguments, removes annotations,
 and remaps surviving variables. A proof encountered at a runtime position is an

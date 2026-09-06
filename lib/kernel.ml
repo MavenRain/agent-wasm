@@ -9,12 +9,26 @@ let arity c = c.parameters
 
 let literal = function
   | Lit n -> Some n
-  | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> None
+  | Boolean _ | Compare _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> None
 
 let rec normal budget term =
   let* () = Budget.tick budget in
   match term with
-  | Var _ | Lit _ -> Ok term
+  | Var _ | Lit _ | Boolean _ -> Ok term
+  | Compare (op, a, b) ->
+      let* a = normal budget a in
+      let* b = normal budget b in
+      let result = Option.bind (literal a) (fun x -> Option.map (compare op x) (literal b)) in
+      Ok (Option.fold ~none:(Compare (op, a, b)) ~some:(fun b -> Boolean b) result)
+  | If (c, a, b) ->
+      let* c = normal budget c in
+      (match c with
+       | Boolean true -> normal budget a
+       | Boolean false -> normal budget b
+       | Var _ | Lit _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ ->
+           let* a = normal budget a in
+           let* b = normal budget b in
+           Ok (If (c, a, b)))
   | Add (a, b) ->
       let* a = normal budget a in
       let* b = normal budget b in
@@ -29,7 +43,7 @@ let rec normal budget term =
       let* a = normal budget a in
       (match f with
        | Lam (_, _, body) -> let* body = subst_term budget a body in normal budget body
-       | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Ann _ -> Ok (App (r, f, a)))
+       | Boolean _ | Compare _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Ann _ -> Ok (App (r, f, a)))
   | Let (_, _, value, body) ->
       let* value = normal budget value in
       let* body = subst_term budget value body in
@@ -38,6 +52,7 @@ let rec normal budget term =
   | Ann (a, _) -> normal budget a
 and normal_ty budget = function
   | U32 -> let* () = Budget.tick budget in Ok U32
+  | Bool -> let* () = Budget.tick budget in Ok Bool
   | Eq (a, b) ->
       let* a = normal budget a in
       let* b = normal budget b in
@@ -56,16 +71,16 @@ let argument_phase phase = function Runtime -> phase | Erased -> Ghost
 let domain_allowed relevance ty =
   match relevance with
   | Erased -> Ok ()
-  | Runtime -> (match ty with Eq _ -> Error Runtime_proof | U32 | Pi _ -> Ok ())
+  | Runtime -> (match ty with Eq _ -> Error Runtime_proof | U32 | Bool | Pi _ -> Ok ())
 let result_allowed phase ty =
   match phase with
   | Ghost -> Ok ty
-  | Execute -> (match ty with Eq _ -> Error Runtime_proof | U32 | Pi _ -> Ok ty)
+  | Execute -> (match ty with Eq _ -> Error Runtime_proof | U32 | Bool | Pi _ -> Ok ty)
 
 let rec well_formed budget context ty =
   let* () = Budget.tick budget in
   match ty with
-  | U32 -> Ok ()
+  | U32 | Bool -> Ok ()
   | Eq (a, b) ->
       let* () = check_term budget Ghost context a U32 in
       check_term budget Ghost context b U32
@@ -83,6 +98,16 @@ and infer budget phase context term =
         if phase = Execute && b.relevance = Erased then Error (Erased_use k)
         else shift_ty budget (k + 1) b.ty
   | Lit n -> if n < 0L || n > mask then Error (Invalid_u32 n) else Ok U32
+  | Boolean _ -> Ok Bool
+  | Compare (_, a, b) ->
+      let* () = check_term budget phase context a U32 in
+      let* () = check_term budget phase context b U32 in
+      Ok Bool
+  | If (c, a, b) ->
+      let* () = check_term budget phase context c Bool in
+      let* () = check_term budget phase context a U32 in
+      let* () = check_term budget phase context b U32 in
+      Ok U32
   | Add (a, b) ->
       let* () = check_term budget phase context a U32 in
       let* () = check_term budget phase context b U32 in
@@ -100,7 +125,7 @@ and infer budget phase context term =
            else
              let* () = check_term budget (argument_phase phase r) context a domain in
              subst_ty budget a range
-       | U32 | Eq _ -> Error Expected_function)
+       | U32 | Bool | Eq _ -> Error Expected_function)
   | Let (r, a, value, body) ->
       let* () = well_formed budget context a in
       let* () = check_term budget (argument_phase phase r) context value a in
@@ -123,7 +148,7 @@ let check budget source =
   let rec export_arity count = function
     | U32 -> Ok count
     | Pi (Runtime, U32, rest) -> export_arity (count + 1) rest
-    | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Eq _ | Pi _), _) -> Error Unsupported_export
+    | Bool | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Bool | Eq _ | Pi _), _) -> Error Unsupported_export
   in
   let* parameters = export_arity 0 ty in
   Ok { source; parameters }

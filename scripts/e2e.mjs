@@ -13,11 +13,17 @@ const source = (tree) => Array.isArray(tree) ? `(${tree.map(source).join(' ')})`
 // compiler's de Bruijn substitution, erasure, or Wasm encoding implementation.
 function interpret(tree, env = new Map()) {
   if (!Array.isArray(tree)) {
+    if (tree === 'true') return true;
+    if (tree === 'false') return false;
     if (/^\d+$/.test(String(tree))) return Number(tree);
     assert(env.has(tree), `reference: unknown name ${tree}`);
     return env.get(tree);
   }
   switch (tree[0]) {
+    case 'u32-eq': return interpret(tree[1], env) === interpret(tree[2], env);
+    case 'u32-lt': return interpret(tree[1], env) < interpret(tree[2], env);
+    case 'u32-le': return interpret(tree[1], env) <= interpret(tree[2], env);
+    case 'if': return interpret(tree[interpret(tree[1], env) ? 2 : 3], env);
     case 'add': return (interpret(tree[1], env) + interpret(tree[2], env)) >>> 0;
     case 'fn': return (value) => interpret(tree[2], new Map([...env, [tree[1][1], value]]));
     case 'app': return interpret(tree[2], env)(interpret(tree[3], env));
@@ -34,7 +40,7 @@ let fresh = 0;
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(5)) {
+  switch (random(6)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -43,11 +49,32 @@ function generate(depth, names) {
     }
     case 3: return ['app', 'run', ['fn', ['run', name, 'u32'], generate(depth - 1, [...names, name])], generate(depth - 1, names)];
     case 4: return names[random(names.length)];
+    case 5: return ['if', [['u32-eq', 'u32-lt', 'u32-le'][random(3)],
+      generate(depth - 1, names), generate(depth - 1, names)],
+      generate(depth - 1, names), generate(depth - 1, names)];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const op of ['u32-eq', 'u32-lt', 'u32-le']) {
+  for (const a of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
+    for (const b of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
+      cases.push({ name: `${op}-${a}-${b}`, body: ['fn', ['run', 'x', 'u32'],
+        ['fn', ['run', 'y', 'u32'], ['if', [op, 'x', 'y'], ['add', 'x', 3], ['add', 'y', 7]]]], args: [a, b] });
+    }
+  }
+}
+for (const flag of ['true', 'false']) {
+  cases.push({ name: `boolean-closure-${flag}`, body:
+    ['app', 'run', ['fn', ['run', 'b', 'bool'],
+      ['let', ['run', 'x', 'u32'], ['if', 'b', ['add', 10, 1], ['add', 20, 2]],
+        ['add', 'x', ['if', 'b', ['add', 'x', 3], ['add', 'x', 4]]]]], flag], args: [] });
+}
+for (const price of [0, 99, 100, 101, 0xffffffff]) {
+  cases.push({ name: `price-ceiling-${price}`, body: ['fn', ['run', 'price', 'u32'],
+    ['if', ['u32-le', 'price', 100], 1, 0]], args: [price] });
+}
 for (const n of [0, 1, 63, 64, 127, 128, 8191, 8192, 0x7fffffff, 0x80000000, 0xfffffffe, 0xffffffff]) {
   cases.push({ name: `literal-${n}`, body: n, args: [] });
   cases.push({ name: `add-${n}`, body: ['fn', ['run', 'x', 'u32'], ['add', 'x', n]], args: [0xffffffff] });
@@ -89,6 +116,8 @@ function additions(count, leaf) {
 cases.push({ name: 'local-limit', body: additions(50000, 1), args: [], fuel: '100000000' });
 cases.push({ name: 'local-limit-with-parameter', body: ['fn', ['run', 'x', 'u32'],
   additions(49999, 'x')], args: [2], fuel: '100000000' });
+cases.push({ name: 'branch-local-limit', body: ['if', ['u32-lt', 1, 2],
+  additions(24999, 1), additions(24999, 2)], args: [], fuel: '100000000' });
 
 try {
   let hostCalls = 0;
@@ -130,6 +159,16 @@ try {
   assert.throws(() => run(compiler, ['--fuel', '1', 'compile', 'examples/increment.aw', output]));
   assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   const malformed = join(scratch, 'malformed.aw');
+  for (const body of [['if', 1, 2, 3], ['if', 'true', 1, 'false'],
+    ['let', ['erase', 'b', 'bool'], 'true', ['if', 'b', 1, 0]]]) {
+    writeFileSync(malformed, `(export main ${source(body)})`);
+    const absent = join(scratch, 'invalid-condition.wasm');
+    for (const target of [output, absent]) {
+      assert.throws(() => run(compiler, ['compile', malformed, target]));
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+    assert(!existsSync(absent));
+  }
   for (const text of ['', ')', '(export main 42', '(export main 42) trailing', '('.repeat(130) + ')'.repeat(130), 'x'.repeat(1048577)]) {
     writeFileSync(malformed, text);
     assert.throws(() => run(compiler, ['compile', malformed, output]));
@@ -141,7 +180,7 @@ try {
     assert.throws(() => run(compiler, ['compile', malformed, output]), /parse:/);
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   }
-  for (const name of ['5', '0x2A', '42x', '+', '-x']) {
+  for (const name of ['true', 'false', '5', '0x2A', '42x', '+', '-x']) {
     for (const body of [
       ['fn', ['run', name, 'u32'], 42],
       ['let', ['erase', name, 'u32'], 1, 42],
@@ -158,7 +197,7 @@ try {
     }
   }
   for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
-    additions(65535, 1)]) {
+    additions(65535, 1), ['if', ['u32-lt', 1, 2], additions(25000, 1), additions(24999, 2)]]) {
     writeFileSync(malformed, `(export main ${source(body)})`);
     for (const target of [output, join(scratch, 'over-limit.wasm')]) {
       assert.throws(() => run(compiler, ['--fuel', '100000000', 'compile', malformed, target]),

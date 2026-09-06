@@ -1,4 +1,4 @@
-# M0 validation, 2026-09-06
+# Compiler validation, 2026-09-06
 
 Environment: macOS arm64, OCaml 5.2.1, Dune 3.24.2, Node v23.10.0,
 Wasmtime 48.0.1. Commands run from the project root.
@@ -83,6 +83,50 @@ Two new differential programs exercise arithmetic in a function-producing let,
 a call argument, and a closure body, plus arithmetic before entry parameters
 are applied. Existing local-limit, parameter-order, budget, and erasure checks
 also pass with explicitly threaded state.
+
+## M1 scalar validation slice, 2026-09-06
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 55 cases, 0 failures
+  e2e: 201 programs, 402 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny <absolute-lib> <absolute-bin> <absolute-test>
+  no obligations at or above medium in 14 files
+
+git diff --check
+  clean
+```
+
+Kernel additions cover boolean typing and export restrictions, both branches
+being checked, erased conditions and dead-branch erased uses, conditional
+conversion in equality indices, dependent substitution, and proof erasure.
+Boolean literal names are rejected in all three binder forms.
+
+The named-variable interpreter now evaluates comparisons and conditionals. The
+80 generated cases include nested conditional expressions. Directed tests cover
+all 25 pairs of 0, 1, 2147483647, 2147483648, and 4294967295 for each comparison,
+boolean closure arguments, branch-local calculations used afterward, and prices
+on both sides of the example ceiling. Both hosts execute a conditional at the
+50,000-local boundary, with locals split across both branches. One additional
+local is rejected without creating or altering output. Invalid conditions and
+branches likewise preserve output. No new mechanized proof is claimed.
+
+The existing arithmetic benchmark also completed, including its independent
+runtime checks and proof-erasure byte comparison. Medians in milliseconds:
+
+| Leaves | Plain | Proof-bearing | OCaml native object |
+| --- | ---: | ---: | ---: |
+| 32 | 6.003 | 5.698 | 49.804 |
+| 256 | 13.214 | 18.829 | 70.220 |
+| 1024 | 7.696 | 11.602 | 87.867 |
+
+The [raw slice snapshot](m1-scalar-benchmark.json) records the full samples.
+These timings are higher than the initial snapshot in most cells, particularly
+at 256 leaves. This single run does not isolate compiler changes from machine
+variation and is not a performance gate. It measures the existing arithmetic
+corpus, not validator application performance.
 
 ## Initial performance evidence
 

@@ -1,9 +1,14 @@
 type relevance = Runtime | Erased
 
-type ty = U32 | Eq of term * term | Pi of relevance * ty * ty
+type comparison = Equal | Less | Less_equal
+
+type ty = U32 | Bool | Eq of term * term | Pi of relevance * ty * ty
 and term =
   | Var of int
   | Lit of int64
+  | Boolean of bool
+  | Compare of comparison * term * term
+  | If of term * term * term
   | Add of term * term
   | Lam of relevance * ty * term
   | App of relevance * term * term
@@ -13,6 +18,10 @@ and term =
 
 let mask = 0xffff_ffffL
 let add a b = Int64.logand (Int64.add a b) mask
+let compare op a b = match op with
+  | Equal -> a = b
+  | Less -> a < b
+  | Less_equal -> a <= b
 
 open Error
 
@@ -22,6 +31,16 @@ let rec map_term budget variable depth term =
   match term with
   | Var k -> variable depth k
   | Lit n -> Ok (Lit n)
+  | Boolean b -> Ok (Boolean b)
+  | Compare (op, a, b) ->
+      let* a = map_term budget variable depth a in
+      let* b = map_term budget variable depth b in
+      Ok (Compare (op, a, b))
+  | If (c, a, b) ->
+      let* c = map_term budget variable depth c in
+      let* a = map_term budget variable depth a in
+      let* b = map_term budget variable depth b in
+      Ok (If (c, a, b))
   | Add (a, b) ->
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
@@ -48,6 +67,7 @@ and map_ty budget variable depth ty =
   let* () = Budget.tick budget in
   match ty with
   | U32 -> Ok U32
+  | Bool -> Ok Bool
   | Eq (a, b) ->
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in

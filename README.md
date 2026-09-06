@@ -6,8 +6,9 @@ is a working name. The intended applications are private inference clients,
 constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
-arithmetic, dependent function types, erased arguments, and equality evidence.
-It does not yet implement agent APIs, effects, ownership, runtime validators,
+arithmetic, booleans, unsigned comparisons, conditional branches, dependent
+function types, erased arguments, and equality evidence.
+It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
 cryptography, or persistence. Proof checking and erasure are tested, not formally
 proved. OCaml-speed compilation remains a project acceptance requirement.
 
@@ -63,6 +64,19 @@ _build/default/bin/main.exe check examples/reject-erased-use.aw
 The provisional syntax is an explicit S-expression core. A friendly ML surface
 will be added over the same checker. All applications explicitly select `run` or
 `erase`; there is no implicit proof search or axiom escape hatch.
+
+The first M1 slice adds an executable price predicate:
+
+```sh
+_build/default/bin/main.exe compile examples/price-ceiling.aw artifacts/price-ceiling.wasm
+node scripts/run.mjs artifacts/price-ceiling.wasm 100
+# 1
+node scripts/run.mjs artifacts/price-ceiling.wasm 101
+# 0
+```
+
+Comparisons produce internal booleans and `if` selects a u32 branch. Sums and
+validators returning values with erased evidence remain on the M1 roadmap.
 
 ## Validate
 

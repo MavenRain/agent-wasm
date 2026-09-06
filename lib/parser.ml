@@ -61,7 +61,7 @@ let numeric_name name =
     (Seq.uncons (String.to_seq name))
 
 let binder name =
-  if numeric_name name then Error (Parse "binder name is reserved for literals")
+  if numeric_name name || name = "true" || name = "false" then Error (Parse "binder name is reserved for literals")
   else Ok ()
 
 let atom names name =
@@ -83,6 +83,7 @@ let rec ty budget names tree =
   let* () = Budget.tick budget in
   match tree with
   | Atom "u32" -> Ok U32
+  | Atom "bool" -> Ok Bool
   | List [Atom "eq"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in
@@ -93,12 +94,24 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
       Ok (Pi (r, a, b))
-  | Atom _ | List _ -> Error (Parse "expected u32, eq, or pi type")
+  | Atom _ | List _ -> Error (Parse "expected u32, bool, eq, or pi type")
 and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
+  | Atom "true" -> Ok (Boolean true)
+  | Atom "false" -> Ok (Boolean false)
   | Atom name ->
       atom names name
+  | List [Atom ("u32-eq" | "u32-lt" | "u32-le" as op); a; b] ->
+      let op = if op = "u32-eq" then Equal else if op = "u32-lt" then Less else Less_equal in
+      let* a = term budget names a in
+      let* b = term budget names b in
+      Ok (Compare (op, a, b))
+  | List [Atom "if"; c; a; b] ->
+      let* c = term budget names c in
+      let* a = term budget names a in
+      let* b = term budget names b in
+      Ok (If (c, a, b))
   | List [Atom "add"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in

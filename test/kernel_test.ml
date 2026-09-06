@@ -30,6 +30,31 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "boolean let and application", (fun () -> accepted
+    "(app run (fn (run b bool) (if b 10 20)) true)");
+  "boolean export", (fun () -> rejected Unsupported_export "true");
+  "boolean parameter export", (fun () -> rejected Unsupported_export "(fn (run b bool) (if b 1 0))");
+  "integer condition", (fun () -> rejected Type_mismatch "(if 1 2 3)");
+  "boolean arithmetic", (fun () -> rejected Type_mismatch "(add true 1)");
+  "boolean comparison operand", (fun () -> rejected Type_mismatch "(if (u32-eq true 1) 2 3)");
+  "boolean equality index", (fun () -> rejected Type_mismatch "(let (erase p (eq true true)) (refl true) 0)");
+  "both branches checked", (fun () -> rejected Type_mismatch "(if true 1 false)");
+  "function branch rejected", (fun () -> rejected Type_mismatch "(if true (fn (run x u32) x) 0)");
+  "erased condition", (fun () -> rejected (Erased_use 0) "(let (erase b bool) true (if b 1 0))");
+  "dead branch erased use", (fun () -> rejected (Erased_use 0) "(let (erase x u32) 1 (if true 0 x))");
+  "closed branch conversion", (fun () -> accepted
+    "(let (erase p (eq (if (u32-lt 2147483648 4294967295) 7 8) 7)) (refl 7) 0)");
+  "false branch conversion", (fun () -> accepted
+    "(let (erase p (eq (if (u32-le 4294967295 0) 7 8) 8)) (refl 8) 0)");
+  "equal branch conversion", (fun () -> accepted
+    "(let (erase p (eq (if (u32-eq (add 4294967295 1) 0) 7 8) 7)) (refl 7) 0)");
+  "dependent conditional substitution", (fun () -> accepted
+    "(app erase (app run (fn (run b bool) (fn (erase p (eq (if b 7 8) 7)) 0)) true) (refl 7))");
+  "dependent conditional mismatch", (fun () -> rejected Type_mismatch
+    "(app erase (app run (fn (run b bool) (fn (erase p (eq (if b 7 8) 7)) 0)) false) (refl 7))");
+  "boolean proof erasure", (fun () -> same_output
+    "(fn (run x u32) (let (erase b bool) (u32-lt x 10) (if (u32-le x 20) x 0)))"
+    "(fn (run x u32) (if (u32-le x 20) x 0))");
   "parameter limit", (fun () -> Result.map (fun _ -> ()) (emit_parameters 1000));
   "parameter overflow", (fun () -> Result.fold
     ~ok:(fun _ -> Error (Backend "parameter limit bypass"))
@@ -43,7 +68,7 @@ let cases = [
       ["(fn (run " ^ name ^ " u32) 42)";
        "(let (erase " ^ name ^ " u32) 1 42)";
        "(fn (run f (pi (run " ^ name ^ " u32) u32)) (app run f 42))"])
-    (Ok ()) ["5"; "0x2A"; "42x"; "+"; "-x"; "999999999999999999999999"]);
+    (Ok ()) ["true"; "false"; "5"; "0x2A"; "42x"; "+"; "-x"; "999999999999999999999999"]);
   "symbolic binder", (fun () -> same_output
     "(app run (fn (run tool-price u32) tool-price) 42)"
     "(app run (fn (run x u32) x) 42)");

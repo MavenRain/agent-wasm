@@ -1,7 +1,12 @@
 open Error
 
 type scalar = Local of int | Const of int64
-type expression = Value of scalar | Add of scalar * scalar
+type expression =
+  | Value of scalar
+  | Add of scalar * scalar
+  | Compare of Erase.comparison * scalar * scalar
+  | If of scalar * branch * branch
+and branch = { bindings : (int * expression) list; result : scalar }
 type value = Scalar of scalar | Closure of value list * Erase.term
 type state = { next : int; bindings : (int * expression) list }
 
@@ -13,12 +18,18 @@ let limit_error count kind =
 let local_limit = limit_error max_locals "parameters and locals"
 let parameter_limit = limit_error max_parameters "parameters"
 
+let bind state expression =
+  let* () = if state.next >= max_locals then Error local_limit else Ok () in
+  let local = state.next in
+  let state = { next = local + 1; bindings = (local, expression) :: state.bindings } in
+  Ok (Scalar (Local local), state)
+
 let as_scalar = function
   | Scalar s -> Ok s
   | Closure _ -> Error (Backend "function used as a scalar")
 
 (* Static closure expansion is deliberately limited to this pure, finite slice.
-   Arithmetic stays executable. Every expanded addition gets a Wasm local. *)
+   Scalar operations stay executable and each receives a Wasm local. *)
 let rec evaluate budget state scope term =
   let* () = Budget.tick budget in
   match term with
@@ -31,10 +42,24 @@ let rec evaluate budget state scope term =
       let* a = as_scalar a in
       let* b, state = evaluate budget state scope b in
       let* b = as_scalar b in
-      let* () = if state.next >= max_locals then Error local_limit else Ok () in
-      let local = state.next in
-      let state = { next = local + 1; bindings = (local, Add (a, b)) :: state.bindings } in
-      Ok (Scalar (Local local), state)
+      bind state (Add (a, b))
+  | Erase.Compare (op, a, b) ->
+      let* a, state = evaluate budget state scope a in
+      let* a = as_scalar a in
+      let* b, state = evaluate budget state scope b in
+      let* b = as_scalar b in
+      bind state (Compare (op, a, b))
+  | Erase.If (c, a, b) ->
+      let* c, state = evaluate budget state scope c in
+      let* c = as_scalar c in
+      (* Branch instructions remain nested, while local numbers are disjoint. *)
+      let* a, a_state = evaluate budget { next = state.next; bindings = [] } scope a in
+      let* a = as_scalar a in
+      let* b, b_state = evaluate budget { next = a_state.next; bindings = [] } scope b in
+      let* b = as_scalar b in
+      bind { state with next = b_state.next }
+        (If (c, { bindings = a_state.bindings; result = a },
+                { bindings = b_state.bindings; result = b }))
   | Erase.Fn body -> Ok (Closure (scope, body), state)
   | Erase.Call (f, a) ->
       let* f, state = evaluate budget state scope f in
@@ -75,9 +100,31 @@ let emit_scalar output = function
       byte output 0x41;
       signed output (if n > 0x7fff_ffffL then Int64.sub n 0x1_0000_0000L else n)
 
-let emit_expression output = function
-  | Value s -> emit_scalar output s
-  | Add (a, b) -> emit_scalar output a; emit_scalar output b; byte output 0x6a
+let rec emit_expression budget output = function
+  | Value s -> emit_scalar output s; Ok ()
+  | Add (a, b) -> emit_scalar output a; emit_scalar output b; byte output 0x6a; Ok ()
+  | Compare (op, a, b) ->
+      emit_scalar output a; emit_scalar output b;
+      byte output (match op with Erase.Equal -> 0x46 | Erase.Less -> 0x49 | Erase.Less_equal -> 0x4d);
+      Ok ()
+  | If (c, a, b) ->
+      emit_scalar output c;
+      byte output 0x04; byte output 0x7f;
+      let* () = emit_bindings budget output a.bindings in
+      emit_scalar output a.result;
+      byte output 0x05;
+      let* () = emit_bindings budget output b.bindings in
+      emit_scalar output b.result;
+      byte output 0x0b;
+      Ok ()
+and emit_bindings budget output bindings =
+  List.fold_left (fun acc (index, expression) ->
+    let* () = acc in
+    let* () = Budget.tick budget in
+    let* () = emit_expression budget output expression in
+    byte output 0x21;
+    unsigned output index;
+    Ok ()) (Ok ()) (List.rev bindings)
 
 let emit budget program =
   let* () = if program.Erase.arity > max_parameters then Error parameter_limit else Ok () in
@@ -108,14 +155,8 @@ let emit budget program =
   let local_count = state.next - program.arity in
   if local_count = 0 then unsigned code 0
   else (unsigned code 1; unsigned code local_count; byte code 0x7f);
-  let* () = List.fold_left (fun acc (index, expression) ->
-    let* () = acc in
-    let* () = Budget.tick budget in
-    emit_expression code expression;
-    byte code 0x21;
-    unsigned code index;
-    Ok ()) (Ok ()) (List.rev state.bindings) in
-  emit_expression code (Value result);
+  let* () = emit_bindings budget code state.bindings in
+  let* () = emit_expression budget code (Value result) in
   byte code 0x0b;
   section output 10 (contents (fun b ->
     unsigned b 1; unsigned b (Buffer.length code); Buffer.add_buffer b code));

@@ -1,9 +1,13 @@
 open Error
 
+type comparison = Equal | Less | Less_equal
+
 type term =
   | Local of int
   | Const of int64
   | Add of term * term
+  | Compare of comparison * term * term
+  | If of term * term * term
   | Fn of term
   | Call of term * term
   | Let of term * term
@@ -19,6 +23,17 @@ let run budget checked =
         let* level = Option.to_result ~none:(Erased_use k) level in
         Ok (Local (depth - level - 1))
     | Ast.Lit n -> Ok (Const n)
+    | Ast.Boolean b -> Ok (Const (if b then 1L else 0L))
+    | Ast.Compare (op, a, b) ->
+        let op = match op with Ast.Equal -> Equal | Ast.Less -> Less | Ast.Less_equal -> Less_equal in
+        let* a = walk scope depth a in
+        let* b = walk scope depth b in
+        Ok (Compare (op, a, b))
+    | Ast.If (c, a, b) ->
+        let* c = walk scope depth c in
+        let* a = walk scope depth a in
+        let* b = walk scope depth b in
+        Ok (If (c, a, b))
     | Ast.Add (a, b) ->
         let* a = walk scope depth a in
         let* b = walk scope depth b in
@@ -47,6 +62,10 @@ let dump program =
     | Local n -> "v" ^ string_of_int n
     | Const n -> Int64.to_string n
     | Add (a, b) -> "(add " ^ term a ^ " " ^ term b ^ ")"
+    | Compare (op, a, b) ->
+        let name = match op with Equal -> "u32-eq" | Less -> "u32-lt" | Less_equal -> "u32-le" in
+        "(" ^ name ^ " " ^ term a ^ " " ^ term b ^ ")"
+    | If (c, a, b) -> "(if " ^ term c ^ " " ^ term a ^ " " ^ term b ^ ")"
     | Fn body -> "(fn " ^ term body ^ ")"
     | Call (f, a) -> "(call " ^ term f ^ " " ^ term a ^ ")"
     | Let (a, body) -> "(let " ^ term a ^ " " ^ term body ^ ")"
