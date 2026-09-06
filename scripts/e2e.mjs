@@ -73,6 +73,12 @@ for (const selected of ['x', 'y', 'z']) {
     args: [11, 22, 33] });
 }
 cases.push({ name: 'leading-zeros', body: '00000000000000000000000042', args: [] });
+cases.push({ name: 'state-through-call', body:
+  ['app', 'run', ['let', ['run', 'captured', 'u32'], ['add', 10, 20],
+    ['fn', ['run', 'arg', 'u32'], ['add', 'captured', 'arg']]], ['add', 3, 4]], args: [] });
+cases.push({ name: 'state-before-parameters', body:
+  ['let', ['run', 'captured', 'u32'], ['add', 10, 20],
+    ['fn', ['run', 'arg', 'u32'], ['add', 'captured', 'arg']]], args: [12] });
 
 // Balanced trees reach the backend limit without exceeding parser depth.
 function additions(count, leaf) {
@@ -134,6 +140,22 @@ try {
     writeFileSync(malformed, `(export main ${literal})`);
     assert.throws(() => run(compiler, ['compile', malformed, output]), /parse:/);
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+  }
+  for (const name of ['5', '0x2A', '42x', '+', '-x']) {
+    for (const body of [
+      ['fn', ['run', name, 'u32'], 42],
+      ['let', ['erase', name, 'u32'], 1, 42],
+      ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
+    ]) {
+      writeFileSync(malformed, `(export main ${source(body)})`);
+      const absent = join(scratch, 'bad-binder.wasm');
+      for (const target of [output, absent]) {
+        assert.throws(() => run(compiler, ['compile', malformed, target]),
+          /parse: binder name is reserved for literals/);
+      }
+      assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+      assert(!existsSync(absent));
+    }
   }
   for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
     additions(65535, 1)]) {

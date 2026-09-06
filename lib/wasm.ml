@@ -3,11 +3,15 @@ open Error
 type scalar = Local of int | Const of int64
 type expression = Value of scalar | Add of scalar * scalar
 type value = Scalar of scalar | Closure of value list * Erase.term
-type state = { mutable next : int; mutable bindings : (int * expression) list }
+type state = { next : int; bindings : (int * expression) list }
 
 (* A compiler portability limit, counting parameters and generated locals. *)
 let max_locals = 50_000
-let local_limit = Backend "function exceeds 50000 parameters and locals"
+let max_parameters = 1_000
+let limit_error count kind =
+  Backend ("function exceeds " ^ string_of_int count ^ " " ^ kind)
+let local_limit = limit_error max_locals "parameters and locals"
+let parameter_limit = limit_error max_parameters "parameters"
 
 let as_scalar = function
   | Scalar s -> Ok s
@@ -18,25 +22,26 @@ let as_scalar = function
 let rec evaluate budget state scope term =
   let* () = Budget.tick budget in
   match term with
-  | Erase.Local k -> Option.to_result ~none:(Invalid_index k) (List.nth_opt scope k)
-  | Erase.Const n -> Ok (Scalar (Const n))
+  | Erase.Local k ->
+      let* value = Option.to_result ~none:(Invalid_index k) (List.nth_opt scope k) in
+      Ok (value, state)
+  | Erase.Const n -> Ok (Scalar (Const n), state)
   | Erase.Add (a, b) ->
-      let* a = evaluate budget state scope a in
+      let* a, state = evaluate budget state scope a in
       let* a = as_scalar a in
-      let* b = evaluate budget state scope b in
+      let* b, state = evaluate budget state scope b in
       let* b = as_scalar b in
       let* () = if state.next >= max_locals then Error local_limit else Ok () in
       let local = state.next in
-      state.next <- local + 1;
-      state.bindings <- (local, Add (a, b)) :: state.bindings;
-      Ok (Scalar (Local local))
-  | Erase.Fn body -> Ok (Closure (scope, body))
+      let state = { next = local + 1; bindings = (local, Add (a, b)) :: state.bindings } in
+      Ok (Scalar (Local local), state)
+  | Erase.Fn body -> Ok (Closure (scope, body), state)
   | Erase.Call (f, a) ->
-      let* f = evaluate budget state scope f in
-      let* a = evaluate budget state scope a in
+      let* f, state = evaluate budget state scope f in
+      let* a, state = evaluate budget state scope a in
       apply budget state f a
   | Erase.Let (a, body) ->
-      let* a = evaluate budget state scope a in
+      let* a, state = evaluate budget state scope a in
       evaluate budget state (a :: scope) body
 and apply budget state f a =
   let* () = Budget.tick budget in
@@ -75,16 +80,18 @@ let emit_expression output = function
   | Add (a, b) -> emit_scalar output a; emit_scalar output b; byte output 0x6a
 
 let emit budget program =
-  let* () = if program.Erase.arity > max_locals then Error local_limit else Ok () in
+  let* () = if program.Erase.arity > max_parameters then Error parameter_limit else Ok () in
   let state = { next = program.Erase.arity; bindings = [] } in
-  let* entry = evaluate budget state [] program.body in
-  let rec parameters index value =
-    if index = program.arity then as_scalar value
+  let* entry, state = evaluate budget state [] program.body in
+  let rec parameters index value state =
+    if index = program.arity then
+      let* scalar = as_scalar value in
+      Ok (scalar, state)
     else
-      let* value = apply budget state value (Scalar (Local index)) in
-      parameters (index + 1) value
+      let* value, state = apply budget state value (Scalar (Local index)) in
+      parameters (index + 1) value state
   in
-  let* result = parameters 0 entry in
+  let* result, state = parameters 0 entry state in
   let output = Buffer.create 256 in
   Buffer.add_string output "\x00asm\x01\x00\x00\x00";
   section output 1 (contents (fun b ->

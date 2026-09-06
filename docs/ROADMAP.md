@@ -8,7 +8,9 @@ CLI, rejection tests, differential host execution, and an informational OCaml
 comparison harness. The name and surface syntax remain provisional.
 
 Hardening: decimal-only literal syntax, a 50,000 combined parameter/local backend
-limit, and host regressions for boundary rejection and parameter order are in place.
+limit, a separate 1,000 entry-parameter limit, consistent binder-name validation,
+and host regressions for boundary rejection and parameter order are in place.
+Backend expansion threads immutable state explicitly through eager evaluation.
 
 ## M1: dependent data and executable validation
 

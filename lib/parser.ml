@@ -54,12 +54,18 @@ let lookup name names =
     | x :: rest -> if x = name then Ok (Var i) else loop (i + 1) rest
   in loop 0 names
 
-let atom names name =
-  let digit c = c >= '0' && c <= '9' in
-  let numeric = Option.fold ~none:false
+let digit c = c >= '0' && c <= '9'
+let numeric_name name =
+  Option.fold ~none:false
     ~some:(fun (c, _) -> digit c || c = '+' || c = '-')
-    (Seq.uncons (String.to_seq name)) in
-  if not numeric then lookup name names
+    (Seq.uncons (String.to_seq name))
+
+let binder name =
+  if numeric_name name then Error (Parse "binder name is reserved for literals")
+  else Ok ()
+
+let atom names name =
+  if not (numeric_name name) then lookup name names
   else if not (String.for_all digit name) then
     Error (Parse "expected an unsigned decimal u32 literal")
   else
@@ -82,6 +88,7 @@ let rec ty budget names tree =
       let* b = term budget names b in
       Ok (Eq (a, b))
   | List [Atom "pi"; List [r; Atom name; a]; b] ->
+      let* () = binder name in
       let* r = relevance r in
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
@@ -97,6 +104,7 @@ and term budget names tree =
       let* b = term budget names b in
       Ok (Add (a, b))
   | List [Atom "fn"; List [r; Atom name; a]; body] ->
+      let* () = binder name in
       let* r = relevance r in
       let* a = ty budget names a in
       let* body = term budget (name :: names) body in
@@ -107,6 +115,7 @@ and term budget names tree =
       let* a = term budget names a in
       Ok (App (r, f, a))
   | List [Atom "let"; List [r; Atom name; a]; value; body] ->
+      let* () = binder name in
       let* r = relevance r in
       let* a = ty budget names a in
       let* value = term budget names value in

@@ -20,7 +20,33 @@ let dependent n x proof =
   "(fn (erase n u32) (fn (run x u32) (fn (erase p (eq x n)) x))) " ^
   n ^ ") " ^ x ^ ") " ^ proof ^ ")"
 
+(* Direct AST clients bypass the parser's depth limit. *)
+let emit_parameters count =
+  let budget = Budget.create 1_000_000 in
+  let body = List.fold_left (fun body _ -> Ast.Lam (Ast.Runtime, Ast.U32, body))
+    (Ast.Add (Ast.Var (count - 1), Ast.Var 0)) (List.init count Fun.id) in
+  let* checked = Kernel.check budget body in
+  let* runtime = Erase.run budget checked in
+  Wasm.emit budget runtime
+
 let cases = [
+  "parameter limit", (fun () -> Result.map (fun _ -> ()) (emit_parameters 1000));
+  "parameter overflow", (fun () -> Result.fold
+    ~ok:(fun _ -> Error (Backend "parameter limit bypass"))
+    ~error:(fun e -> if e = Backend "function exceeds 1000 parameters" then Ok () else Error e)
+    (emit_parameters 1001));
+  "reserved binders", (fun () -> List.fold_left (fun acc name ->
+    let* () = acc in
+    List.fold_left (fun acc body ->
+      let* () = acc in
+      rejected (Parse "binder name is reserved for literals") body) (Ok ())
+      ["(fn (run " ^ name ^ " u32) 42)";
+       "(let (erase " ^ name ^ " u32) 1 42)";
+       "(fn (run f (pi (run " ^ name ^ " u32) u32)) (app run f 42))"])
+    (Ok ()) ["5"; "0x2A"; "42x"; "+"; "-x"; "999999999999999999999999"]);
+  "symbolic binder", (fun () -> same_output
+    "(app run (fn (run tool-price u32) tool-price) 42)"
+    "(app run (fn (run x u32) x) 42)");
   "literal", (fun () -> accepted "42");
   "u32 maximum", (fun () -> accepted "4294967295");
   "negative", (fun () -> rejected (Parse "expected an unsigned decimal u32 literal") "-1");

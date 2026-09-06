@@ -54,6 +54,36 @@ no new artifact. Argument-selection cases distinguish all three entry parameters
 also with an intervening erased proof binder. Literal cases cover leading zeros,
 non-decimal syntax, signed syntax, separators, and values beyond both u32 and i64.
 
+## M0 boundary and state follow-up, 2026-09-06
+
+After enforcing the separate parameter cap, validating binder names, and
+threading immutable backend state:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 38 cases, 0 failures
+  e2e: 118 programs, 236 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny lib bin test
+  no obligations at or above medium in 14 files
+
+git diff --check
+  clean
+```
+
+Direct AST tests accept 1,000 entry parameters and reject 1,001 through checking,
+erasure, and emission, without depending on the parser's depth cap. These are
+library tests; the host suite exercises source programs within the parser limit.
+Binder regressions cover functions, lets, and product types, including unused
+names beginning with decimal digits or signs. CLI rejection preserves existing
+output and creates no new artifact. A valid hyphenated name remains accepted.
+
+Two new differential programs exercise arithmetic in a function-producing let,
+a call argument, and a closure body, plus arithmetic before entry parameters
+are applied. Existing local-limit, parameter-order, budget, and erasure checks
+also pass with explicitly threaded state.
+
 ## Initial performance evidence
 
 Command: `opam exec -- python3 -P scripts/bench.py`.
