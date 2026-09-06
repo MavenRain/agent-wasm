@@ -7,7 +7,7 @@ constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
 arithmetic, booleans, unsigned comparisons, conditional branches, pairs, dependent
-function types, erased arguments, and equality evidence.
+function types, erased arguments, equality evidence, and equality transport.
 It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
 cryptography, or persistence. Proof checking and erasure are tested, not formally
 proved. OCaml-speed compilation remains a project acceptance requirement.
@@ -108,6 +108,17 @@ node scripts/run.mjs artifacts/budget-policy.wasm 4294967295 1 100
 The example detects overflow before comparing the modular total with the ceiling.
 It returns a decision; structured errors and evidence-bearing results remain open.
 
+Equality transport rewrites a type family using checked evidence:
+`(transport (index FAMILY) from to proof value)` takes a value of `FAMILY[from]`
+to `FAMILY[to]`, requiring `proof : (eq from to)`. The family binds a ghost u32
+index. For example, `(transport (x (eq x a)) a b proof (refl a))` derives
+`eq b a` from `proof : eq a b` in a ghost context.
+
+`examples/transport.aw` defines this symmetry helper and uses it in an increment
+program. It emits the same runtime IR and Wasm bytes as `increment-plain.aw`.
+Transport preserves only its value at runtime; it cannot replace executable
+validation or turn a comparison into a proof.
+
 ## Validate
 
 ```sh
@@ -123,7 +134,7 @@ u32 boundaries, multi-byte encodings, variable capture, malformed inputs, and
 rejection without output mutation.
 
 The benchmark compares fresh compiler invocations with `ocamlopt -c` on matched
-u32 arithmetic workloads, including a proof-bearing version. It records all
+u32 arithmetic workloads, including proof-bearing and transport versions. It records all
 samples, input hashes, compiler hash, and environment under `artifacts/bench/`.
 Wasm module emission and native object emission are different tasks. This small
 benchmark cannot establish application-scale or incremental compilation parity.

@@ -20,8 +20,8 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: add sums, records, dependent pairs, and equality transport
-with a precise erasure rule. Represent validation as an executable branch yielding
+Next: add sums, records, and dependent pairs. Represent validation as an
+executable branch yielding
 either an error or a value with erased evidence. First domain example: a proposed
 tool action checked against an explicit immutable allowlist and price ceiling.
 Amounts need non-wrapping arithmetic or explicit overflow errors.
@@ -38,6 +38,15 @@ The budget-policy example detects u32 addition overflow before checking a ceilin
 so wrapping cannot turn an excessive proposal into an accepted one. It returns
 an integer decision; distinct overflow errors and evidence-bearing results remain
 open.
+
+Implemented fourth slice: explicit equality transport over u32-indexed type
+families. Endpoints and equality evidence are checked in the ghost phase; the
+transported value is checked in the enclosing phase. Erasure keeps only the
+value because type indices cannot change runtime representation in this
+fragment. Abstract symmetry and transitivity are expressible. Reflexive
+transport reduces during conversion; transport with an open proof stays
+symbolic. The symmetry example emits the same module as plain increment.
+This does not yet connect executable comparisons to refined evidence.
 
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported

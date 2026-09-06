@@ -9,7 +9,7 @@ let arity c = c.parameters
 
 let literal = function
   | Lit n -> Some n
-  | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> None
+  | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> None
 
 let rec normal budget term =
   let* () = Budget.tick budget in
@@ -23,12 +23,12 @@ let rec normal budget term =
       let* a = normal budget a in
       (match a with
        | Pair (a, _) -> Ok a
-       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> Ok (Fst a))
+       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Fst a))
   | Snd a ->
       let* a = normal budget a in
       (match a with
        | Pair (_, b) -> Ok b
-       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ -> Ok (Snd a))
+       | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Snd a))
   | Compare (op, a, b) ->
       let* a = normal budget a in
       let* b = normal budget b in
@@ -39,7 +39,7 @@ let rec normal budget term =
       (match c with
        | Boolean true -> normal budget a
        | Boolean false -> normal budget b
-       | Pair _ | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Ann _ ->
+       | Pair _ | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ ->
            let* a = normal budget a in
            let* b = normal budget b in
            Ok (If (c, a, b)))
@@ -57,12 +57,23 @@ let rec normal budget term =
       let* a = normal budget a in
       (match f with
        | Lam (_, _, body) -> let* body = subst_term budget a body in normal budget body
-       | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Ann _ -> Ok (App (r, f, a)))
+       | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (App (r, f, a)))
   | Let (_, _, value, body) ->
       let* value = normal budget value in
       let* body = subst_term budget value body in
       normal budget body
   | Refl a -> Result.map (fun a -> Refl a) (normal budget a)
+  | Transport (family, a, b, proof, value) ->
+      let* proof = normal budget proof in
+      (match proof with
+       | Refl _ -> normal budget value
+       | Var _ | Lit _ | Boolean _ | Pair _ | Fst _ | Snd _ | Compare _ | If _
+       | Add _ | Lam _ | App _ | Let _ | Transport _ | Ann _ ->
+           let* family = normal_ty budget family in
+           let* a = normal budget a in
+           let* b = normal budget b in
+           let* value = normal budget value in
+           Ok (Transport (family, a, b, proof, value)))
   | Ann (a, _) -> normal budget a
 and normal_ty budget = function
   | U32 -> let* () = Budget.tick budget in Ok U32
@@ -174,6 +185,15 @@ and infer budget phase context term =
   | Refl a ->
       let* () = check_term budget Ghost context a U32 in
       Ok (Eq (a, a))
+  | Transport (family, a, b, proof, value) ->
+      let* () = check_term budget Ghost context a U32 in
+      let* () = check_term budget Ghost context b U32 in
+      let* () = well_formed budget ({ relevance = Erased; ty = U32 } :: context) family in
+      let* () = check_term budget Ghost context proof (Eq (a, b)) in
+      let* source = subst_ty budget a family in
+      let* target = subst_ty budget b family in
+      let* () = check_term budget phase context value source in
+      Ok target
   | Ann (a, ty) ->
       let* () = well_formed budget context ty in
       let* () = check_term budget phase context a ty in

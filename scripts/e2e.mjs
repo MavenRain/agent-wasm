@@ -32,6 +32,7 @@ function interpret(tree, env = new Map()) {
     case 'app': return interpret(tree[2], env)(interpret(tree[3], env));
     case 'let': return interpret(tree[3], new Map([...env, [tree[1][1], interpret(tree[2], env)]]));
     case 'refl': return { witness: interpret(tree[1], env) };
+    case 'transport': return interpret(tree[5], env);
     case 'ann': return interpret(tree[1], env);
     default: throw new Error(`reference: unsupported ${tree[0]}`);
   }
@@ -62,6 +63,19 @@ function generate(depth, names) {
 }
 
 const cases = [];
+for (const input of [0, 1, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  cases.push({ name: `transport-example-${input}`, file: 'examples/transport.aw',
+    args: [input], expected: (input + 1) >>> 0 });
+  cases.push({ name: `transport-capture-${input}`, body:
+    ['fn', ['run', 'input', 'u32'],
+      ['let', ['erase', 'proof', ['eq', 'input', 'input']], ['refl', 'input'],
+        ['app', 'run', ['transport', ['index', ['pi', ['run', 'arg', 'u32'], 'u32']],
+          'input', 'input', 'proof', ['fn', ['run', 'arg', 'u32'], ['add', 'input', 'arg']]], 17]]],
+    args: [input] });
+  cases.push({ name: `transport-pair-${input}`, body:
+    ['fn', ['run', 'input', 'u32'], ['snd', ['transport', ['index', ['product', 'bool', 'u32']],
+      'input', 'input', ['refl', 'input'], ['pair', 'true', ['add', 'input', 3]]]]], args: [input] });
+}
 for (const args of [[7, 100], [9, 0], [7, 101], [8, 50], [9, 0xffffffff]]) {
   cases.push({ name: `tool-policy-${args.join('-')}`, file: 'examples/tool-policy.aw',
     body: ['fn', ['run', 'tool', 'u32'], ['fn', ['run', 'price', 'u32'],
@@ -114,7 +128,7 @@ for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
     for (const ceiling of [0, 100, 0xffffffff]) {
       // JS addition is exact over two u32 inputs, independently of modular detection.
       cases.push({ name: `budget-policy-${spent}-${proposed}-${ceiling}`,
-        file: 'examples/budget-policy.aw', body: Number(spent + proposed <= ceiling),
+        file: 'examples/budget-policy.aw',
         args: [spent, proposed, ceiling], expected: Number(spent + proposed <= ceiling) });
     }
   }
@@ -135,6 +149,13 @@ for (const n of [0, 1, 63, 64, 127, 128, 8191, 8192, 0x7fffffff, 0x80000000, 0xf
 }
 for (let i = 0; i < 80; i++) {
   cases.push({ name: `generated-${i}`, body: ['fn', ['run', 'input', 'u32'], generate(4, ['input'])], args: [random(0x100000000)] });
+}
+for (let i = 0; i < 30; i++) {
+  const value = generate(4, ['input']);
+  const transported = ['transport', ['index', 'u32'], 'input', 'input', ['refl', 'input'], value];
+  cases.push({ name: `generated-transport-${i}`, body: ['fn', ['run', 'input', 'u32'],
+    ['if', ['u32-lt', 'input', 0x80000000], transported, ['add', transported, 7]]],
+    args: [random(0x100000000)] });
 }
 let wide = 'x';
 for (let i = 0; i < 80; i++) wide = ['add', wide, i];
@@ -196,14 +217,16 @@ try {
     hostCalls += 2;
   }
 
-  const artifacts = ['increment', 'increment-plain', 'dependent'].map((name) => {
+  const artifacts = ['increment', 'increment-plain', 'dependent', 'transport'].map((name) => {
     const path = join(scratch, `${name}.wasm`);
     run(compiler, ['compile', `examples/${name}.aw`, path]);
     return readFileSync(path);
   });
   assert(artifacts[0].equals(artifacts[1]), 'proof let altered Wasm bytes');
   assert(artifacts[0].equals(artifacts[2]), 'dependent argument erasure altered Wasm bytes');
+  assert(artifacts[0].equals(artifacts[3]), 'transport example altered Wasm bytes');
   assert.equal(run(compiler, ['ir', 'examples/increment.aw']), run(compiler, ['ir', 'examples/increment-plain.aw']));
+  assert.equal(run(compiler, ['ir', 'examples/transport.aw']), run(compiler, ['ir', 'examples/increment-plain.aw']));
 
   const output = join(scratch, 'rejected.wasm');
   for (const name of ['reject-false-proof', 'reject-erased-use']) {
@@ -217,6 +240,11 @@ try {
   assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   const malformed = join(scratch, 'malformed.aw');
   for (const body of [['if', 1, 2, 3], ['if', 'true', 1, 'false'],
+    ['transport', ['x', 'u32'], 1, 2, ['refl', 1], 42],
+    ['transport', ['x', 'u32'], 1, 1, ['refl', 2], 42],
+    ['transport', ['x', 'u32'], 1, 1, ['refl', 1], 'true'],
+    ['let', ['erase', 'n', 'u32'], 7, ['transport', ['x', 'u32'], 'n', 'n', ['refl', 'n'], 'n']],
+    ['transport', ['x', ['eq', 'x', 'x']], 1, 1, ['refl', 1], ['refl', 1]],
     ['fst', 1], ['pair', 1, 2], ['fst', ['pair', 1, ['refl', 2]]],
     ['let', ['erase', 'p', ['product', 'u32', 'u32']], ['pair', 1, 2], ['snd', 'p']],
     ['let', ['erase', 'b', 'bool'], 'true', ['if', 'b', 1, 0]]]) {
@@ -243,6 +271,7 @@ try {
     for (const body of [
       ['fn', ['run', name, 'u32'], 42],
       ['let', ['erase', name, 'u32'], 1, 42],
+      ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
       ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
     ]) {
       writeFileSync(malformed, `(export main ${source(body)})`);

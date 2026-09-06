@@ -30,6 +30,7 @@ term    ::= integer | true | false | name
           | (app rel term term)
           | (let (rel name type) term term)
           | (refl term)
+          | (transport (name type) term term term term)
           | (ann term type)
 ```
 
@@ -38,7 +39,8 @@ allowed. Names elaborate to de Bruijn indices, including occurrences in types.
 Integer literals use one or more ASCII decimal digits and range from 0 through
 4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
 rejected. Tokens starting with a digit or sign are reserved for literals and
-cannot be used as binder names in functions, products, or lets.
+cannot be used as binder names in functions, dependent function types, lets,
+or transport families.
 The boolean literals `true` and `false` are also reserved binder names.
 Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
@@ -51,8 +53,8 @@ return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
 two branches of the same scalar type, either u32 or bool. Both branches are
 checked in the enclosing phase, including an unreachable branch. At runtime
-the condition is evaluated first and only
-the selected branch executes. Function-valued and product-valued branches are
+the condition is evaluated first and only the selected branch executes.
+Function-valued and product-valued branches are
 not supported in this slice. Internal functions and lets can bind booleans;
 the export ABI remains exclusively `u32 -> ... -> u32`.
 
@@ -74,7 +76,7 @@ against the compilation budget even though execution chooses only one.
 `examples/price-ceiling.aw` returns 1 when an input price is at most 100, else 0.
 It uses no arithmetic on amounts. This is an executable predicate, not yet the
 planned validator returning a sum with erased evidence. Sums, records, dependent
-pairs, transport, and non-wrapping amount operations remain future M1 work.
+pairs, and non-wrapping amount operations remain future M1 work.
 
 ## M1 product slice
 
@@ -105,7 +107,7 @@ it is not a general object ABI.
 `examples/tool-policy.aw` packages a tool identifier and price as a pair and
 checks the immutable allowlist {7, 9} and price ceiling 100. It returns 1 or 0,
 uses no amount arithmetic, and supplies no host authority or refined evidence.
-Named records, sums, dependent pairs, and transport remain future work.
+Named records, sums, and dependent pairs remain future work.
 
 ## M1 budget policy
 
@@ -123,13 +125,48 @@ The source `add` operation remains modular. The example reports a decision,
 without distinguishing overflow from an exceeded ceiling or constructing erased
 evidence. Structured validation errors remain future work.
 
+## M1 equality transport
+
+`(transport (index FAMILY) from to proof value)` binds `index : u32` only in
+`FAMILY`, with erased relevance. Both endpoints must have type u32 in the ghost
+phase, and `proof` must have type `(eq from to)` in that phase. The family must
+be well formed in the context extended by its index. The checker substitutes
+`from` into the family and checks `value` against that type in the enclosing
+phase, then returns the family with `to` substituted. Substitution removes the
+family binder and lifts replacements under any nested binders.
+
+Transport is available in both phases. Transporting an erased variable into a
+runtime position is rejected, as is returning equality evidence at runtime.
+The family may contain products or dependent functions, subject to the usual
+formation and relevance rules. It cannot branch on its index to select a type:
+indices occur in equality propositions, so transport never changes runtime
+representation. This restriction is essential to the erasure rule.
+
+Conversion first normalizes the proof. When it becomes `refl`, transport reduces
+to its normalized value. Otherwise it normalizes the family, endpoints, and
+value and retains a symbolic transport, even for equal endpoints. There is no
+proof irrelevance or rule equating all proofs. Only checked terms enter this
+conversion path; endpoint agreement has already been established by checking.
+
+Erasure deletes the family, endpoints, and proof and recursively erases only
+the value, in the unchanged surrounding scope. The family binder introduces
+no runtime variable. There is no transport constructor in the runtime IR and
+no extra Wasm instruction or local. Checking and normalization still charge
+the shared compilation budget for ghost work.
+
+Transport supports abstract equality symmetry and transitivity without axioms.
+`examples/transport.aw` defines symmetry in a ghost binding and produces the
+same IR and Wasm as plain increment. Transport consumes evidence; comparisons
+still do not produce proofs or refine branches. Evidence-bearing executable
+validation remains future work.
+
 ## Checking
 
 The type fragment has dependent products and equality indexed by u32 terms.
-It has no universe, arbitrary inductive family, recursion, equality eliminator,
-propositional extensionality, or user axioms. Only reflexivity and definitional
-conversion construct equality evidence. This is a dependent fragment, not a
-general theorem prover.
+It has no universe, arbitrary inductive family, recursion,
+propositional extensionality, or user axioms. Reflexivity, definitional conversion,
+and explicit equality transport construct equality evidence. This is a dependent
+fragment, not a general theorem prover.
 
 Checking uses an execution phase and a ghost phase. In the execution phase,
 erased variables cannot be referenced and equality evidence cannot be returned.
@@ -147,8 +184,10 @@ The bound value is not unfolded in the local context during body checking.
 
 Conversion normalizes beta applications, explicit lets, annotations, and closed
 u32 addition, then compares syntax. No eta rule, arithmetic solver, or general
-rewriting is provided. In particular, symbolic `add x 0` is not definitionally
-equal to `x`. Function parameter annotations and let annotations are explicit.
+automatic rewriting is provided. Explicit transport consumes a checked equality
+proof and reduces on reflexive evidence. In particular, symbolic `add x 0` is not
+definitionally equal to `x`. Function parameter annotations and let annotations
+are explicit.
 
 The public entry type must be `u32 -> ... -> u32`, with zero or more runtime
 parameters. Internal higher-order functions are allowed within the finite,
@@ -158,10 +197,11 @@ statically expandable fragment. Higher-order exports are rejected.
 
 Only an abstract `Kernel.checked` value can enter the erasure API. The erased
 program type is private and contains only constants, locals, addition, comparisons,
-conditionals, functions, calls, and lets. It has no source type or proof constructors.
+conditionals, pairs, projections, functions, calls, and lets.
+It has no source type or proof constructors.
 
-Erasure deletes erased binders and their values or arguments, removes annotations,
-and remaps surviving variables. A proof encountered at a runtime position is an
+Erasure deletes erased binders and their values or arguments, removes annotations
+and transport wrappers, and remaps surviving variables. A proof encountered at a runtime position is an
 error even after checking. Code generation sees only the erased program.
 
 The backend expands static closures with lexical environments, converts each

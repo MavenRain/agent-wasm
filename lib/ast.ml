@@ -17,6 +17,8 @@ and term =
   | App of relevance * term * term
   | Let of relevance * ty * term * term
   | Refl of term
+  (* Only the family binds a ghost u32 index; endpoints, proof, and value do not. *)
+  | Transport of ty * term * term * term * term
   | Ann of term * ty
 
 let mask = 0xffff_ffffL
@@ -68,6 +70,13 @@ let rec map_term budget variable depth term =
       let* body = map_term budget variable (depth + 1) body in
       Ok (Let (r, a, value, body))
   | Refl a -> Result.map (fun a -> Refl a) (map_term budget variable depth a)
+  | Transport (family, a, b, proof, value) ->
+      let* family = map_ty budget variable (depth + 1) family in
+      let* a = map_term budget variable depth a in
+      let* b = map_term budget variable depth b in
+      let* proof = map_term budget variable depth proof in
+      let* value = map_term budget variable depth value in
+      Ok (Transport (family, a, b, proof, value))
   | Ann (a, ty) ->
       let* a = map_term budget variable depth a in
       let* ty = map_ty budget variable depth ty in

@@ -61,6 +61,7 @@ let run budget checked =
         let* body = walk (Some depth :: scope) (depth + 1) body in
         Ok (Let (value, body))
     | Ast.Refl _ -> Error Runtime_proof
+    | Ast.Transport (_, _, _, _, value) -> walk scope depth value
     | Ast.Ann (a, _) -> walk scope depth a
   in
   let* body = walk [] 0 (Kernel.term checked) in

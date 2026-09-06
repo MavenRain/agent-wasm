@@ -188,6 +188,49 @@ Cases include zero, exact ceilings, maximum u32, and sums crossing both the
 signed boundary and the u32 limit. Existing local-limit and erasure checks pass.
 No new benchmark or mechanized preservation claim accompanies this slice.
 
+## M1 equality transport, 2026-09-06
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 120 cases, 0 failures
+  e2e: 376 programs, 752 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny lib bin test
+  no obligations at or above medium in 14 files
+
+git diff --check
+  clean
+```
+
+The 29 new kernel cases cover abstract symmetry and transitivity, dependent
+function families, scalar/product erasure, ghost endpoints and proofs, both
+endpoint substitutions, type formation, runtime evidence restrictions, reserved
+binders, capture under a family and nested function binder, open transport
+conversion, computed reflexivity, and exact shared-budget exhaustion.
+
+Both hosts execute the symmetry example, transported closures with captured
+values, and transported pairs across five u32 boundaries. Another 30 generated
+programs place transported computations in executable branches. The independent
+interpreter gives transport the runtime semantics of its value. The symmetry
+example's IR and binary match plain increment. New CLI rejections preserve
+existing artifacts and do not create absent outputs.
+
+Seven targeted mutations were tested in an isolated source copy. All built and
+all were rejected by kernel regressions: checking the wrong proof endpoint,
+substituting the wrong source or target endpoint, checking runtime values in the
+ghost phase, omitting the family binder during substitution, reducing transport
+with an open proof, and inserting a phantom binder during erasure. Original
+sources were restored before final validation. This is regression evidence,
+not a mechanized soundness proof.
+
+The benchmark now includes transport around every arithmetic leaf, alongside
+plain and erased-proof sources at 32, 256, and 1024 leaves. All three variants
+emit identical Wasm bytes and execute against the arithmetic oracle. The
+[transport benchmark snapshot](m1-transport-benchmark.json) records seven samples,
+source and compiler hashes, environment, output sizes, and the OCaml comparison.
+These process-level microbenchmarks do not establish application-scale speed.
+
 ## Initial performance evidence
 
 Command: `opam exec -- python3 -P scripts/bench.py`.

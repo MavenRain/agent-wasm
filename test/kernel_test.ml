@@ -36,6 +36,83 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "transport family capture avoidance", (fun () ->
+    let open Ast in
+    let family = Pi (Erased, Eq (Var 0, Var 1), Eq (Var 1, Var 2)) in
+    let body = Transport (family, Var 0, Var 0, Refl (Var 0), Var 0) in
+    let replacement = Add (Var 0, Lit 1L) in
+    let* actual = subst_term (Budget.create 1000) replacement body in
+    let expected_family = Pi (Erased,
+      Eq (Var 0, Add (Var 1, Lit 1L)), Eq (Var 1, Add (Var 2, Lit 1L))) in
+    let expected = Transport (expected_family, replacement, replacement,
+      Refl replacement, replacement) in
+    if actual = expected then Ok () else Error (Backend "transport captured family variable"));
+  "transport exact budget", (fun () ->
+    let source = "(export main (fn (run n u32) (transport (x u32) n n (refl n) (add n 1))))" in
+    let* artifact = Compiler.compile source in
+    let* exact = Compiler.compile ~fuel:artifact.steps source in
+    if artifact.wasm <> exact.wasm then Error (Backend "transport nondeterministic output")
+    else Result.fold ~ok:(fun _ -> Error (Backend "transport budget bypass"))
+      ~error:(fun e -> if e = Budget_exhausted then Ok () else Error e)
+      (Compiler.compile ~fuel:(artifact.steps - 1) source));
+  "transport scalar erasure", (fun () -> same_output
+    "(fn (run n u32) (transport (x u32) n n (refl n) (add n 1)))"
+    "(fn (run n u32) (add n 1))");
+  "transport ghost endpoints and proof", (fun () -> same_output
+    "(let (erase n u32) 7 (let (erase p (eq n n)) (refl n) (transport (x u32) n n p 42)))"
+    "42");
+  "transport symmetry", (fun () -> accepted
+    "(let (erase symmetry (pi (erase a u32) (pi (erase b u32) (pi (erase p (eq a b)) (eq b a))))) (fn (erase a u32) (fn (erase b u32) (fn (erase p (eq a b)) (transport (x (eq x a)) a b p (refl a))))) 42)");
+  "transport transitivity", (fun () -> accepted
+    "(let (erase trans (pi (erase a u32) (pi (erase b u32) (pi (erase c u32) (pi (erase p (eq a b)) (pi (erase q (eq b c)) (eq a c))))))) (fn (erase a u32) (fn (erase b u32) (fn (erase c u32) (fn (erase p (eq a b)) (fn (erase q (eq b c)) (transport (x (eq a x)) b c q p)))))) 42)");
+  "transport dependent function family", (fun () -> accepted
+    "(fn (run n u32) (let (run f (pi (erase p (eq n n)) u32)) (transport (x (pi (erase p (eq x n)) u32)) n n (refl n) (fn (erase p (eq n n)) 42)) (app erase f (refl n))))");
+  "transport product erasure", (fun () -> same_output
+    "(fn (run n u32) (snd (transport (x (product bool u32)) n n (refl n) (pair true (add n 1)))))"
+    "(fn (run n u32) (snd (pair true (add n 1))))");
+  "transport boolean erasure", (fun () -> same_output
+    "(if (transport (x bool) 0 0 (refl 0) true) 7 9)"
+    "(if true 7 9)");
+  "transport reflexive conversion", (fun () -> accepted
+    "(let (erase p (eq (transport (x u32) 0 (add 4294967295 1) (refl 0) 42) 42)) (refl 42) 0)");
+  "transport computed proof conversion", (fun () -> accepted
+    "(let (erase p (eq (transport (x u32) 0 0 (snd (pair 7 (refl 0))) 42) 42)) (refl 42) 0)");
+  "transport false proof", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x u32) 1 2 (refl 1) 42)");
+  "transport proof endpoints", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x u32) 1 1 (refl 2) 42)");
+  "transport scalar proof", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x u32) 1 1 1 42)");
+  "transport source type", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase p (eq 2 1)) (transport (x (eq x 1)) 2 2 (refl 2) (refl 1)) 0)");
+  "transport source uses from endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase f (pi (erase p (eq 1 2)) (eq 2 1))) (fn (erase p (eq 1 2)) (transport (x (eq x 1)) 1 2 p (refl 2))) 0)");
+  "transport target uses to endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase f (pi (erase p (eq 1 2)) (eq 1 1))) (fn (erase p (eq 1 2)) (transport (x (eq x 1)) 1 2 p (refl 1))) 0)");
+  "transport family formation", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x (eq true x)) 1 1 (refl 1) 42)");
+  "transport boolean endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x u32) true true (refl 0) 42)");
+  "transport target endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(transport (x u32) 0 true (refl 0) 42)");
+  "transport erased value", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase n u32) 7 (transport (x u32) n n (refl n) n))");
+  "transport runtime proof result", (fun () -> kernel_rejects Runtime_proof
+    "(transport (x (eq x x)) 1 1 (refl 1) (refl 1))");
+  "transport proof product result", (fun () -> kernel_rejects Runtime_proof
+    "(transport (x (product (eq x x) u32)) 1 1 (refl 1) (pair (refl 1) 42))");
+  "transport runtime evidence domain", (fun () -> kernel_rejects Runtime_proof
+    "(transport (x (pi (run p (eq x x)) u32)) 1 1 (refl 1) (fn (erase p (eq 1 1)) 42))");
+  "transport binder scope", (fun () -> rejected (Unknown_name "x")
+    "(transport (x u32) x 0 (refl 0) 42)");
+  "transport reserved binder", (fun () -> rejected (Parse "binder name is reserved for literals")
+    "(transport (true u32) 0 0 (refl 0) 42)");
+  "transport substitution under family binder", (fun () -> accepted
+    "(app erase (app run (fn (run n u32) (fn (erase p (eq (transport (x u32) n n (refl n) (add n 1)) 8)) 42)) 7) (refl 8))");
+  "transport open proof stays symbolic", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase f (pi (erase p (eq 0 0)) (eq (transport (x u32) 0 0 p 7) 7))) (fn (erase p (eq 0 0)) (refl 7)) 42)");
+  "transport open proof reflexive", (fun () -> accepted
+    "(let (erase f (pi (erase p (eq 0 0)) (eq (transport (x u32) 0 0 p 7) (transport (x u32) 0 0 p 7)))) (fn (erase p (eq 0 0)) (refl (transport (x u32) 0 0 p 7))) 42)");
   "boolean conditional composition", (fun () -> accepted
     "(if (if true false true) 1 2)");
   "boolean conditional conversion", (fun () -> accepted

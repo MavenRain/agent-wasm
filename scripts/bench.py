@@ -1,4 +1,4 @@
-"""Informational M0 compilation microbenchmark, not a language-wide speed gate."""
+"""Informational compilation microbenchmark, not a language-wide speed gate."""
 
 import argparse
 import hashlib
@@ -62,8 +62,9 @@ def main():
         case.mkdir(exist_ok=True)
         plain_leaves = [f"(add x {i})" for i in range(size)]
         proof_leaves = [f"(let (erase p{i} (eq x x)) (refl x) (add x {i}))" for i in range(size)]
+        transport_leaves = [f"(transport (index u32) x x (refl x) (add x {i}))" for i in range(size)]
         paths = {}
-        for name, leaves in (("plain", plain_leaves), ("proof", proof_leaves)):
+        for name, leaves in (("plain", plain_leaves), ("proof", proof_leaves), ("transport", transport_leaves)):
             body = balanced(leaves, lambda a, b: f"(add\n{a}\n{b})")
             paths[name] = case / f"{name}.aw"
             paths[name].write_text(f"(export main (fn (run x u32) {body}))\n")
@@ -82,8 +83,9 @@ def main():
             row[name] = measure(compile_aw, args.samples)
             row[name]["source_bytes"] = path.stat().st_size
             row[name]["wasm_bytes"] = output.stat().st_size
-        if (case / "plain.wasm").read_bytes() != (case / "proof.wasm").read_bytes():
-            raise RuntimeError("proof-bearing corpus changed runtime output")
+        for name in ("proof", "transport"):
+            if (case / "plain.wasm").read_bytes() != (case / f"{name}.wasm").read_bytes():
+                raise RuntimeError(f"{name} corpus changed runtime output")
 
         def compile_ml():
             for extension in ("cmi", "cmx", "o"):
@@ -92,21 +94,25 @@ def main():
 
         row["ocaml"] = measure(compile_ml, args.samples)
         row["ocaml"]["source_bytes"] = ml.stat().st_size
-        for name in ("plain", "proof"):
+        for name in ("plain", "proof", "transport"):
             row[name]["ratio_to_ocaml"] = row[name]["median_ms"] / row["ocaml"]["median_ms"]
 
-        # Independently execute both generated programs outside the timed region.
+        # Independently execute every generated program outside the timed region.
         check = case / "check.ml"
         check.write_text('let () = Printf.printf "%ld\\n" (Baseline.main 123l)\n')
         command([ocamlopt, "-o", "baseline-run", "baseline.cmx", "check.ml"], cwd=case)
         ocaml_value = int(command([str(case / "baseline-run")])) & 0xffffffff
-        wasm_value = int(command(["node", str(root / "scripts/run.mjs"), str(case / "proof.wasm"), "123"]))
         expected = (size * 123 + size * (size - 1) // 2) & 0xffffffff
-        if ocaml_value != expected or wasm_value != expected:
+        if ocaml_value != expected:
             raise RuntimeError("benchmark programs disagree")
+        for name in paths:
+            wasm_value = int(command(["node", str(root / "scripts/run.mjs"), str(case / f"{name}.wasm"), "123"]))
+            if wasm_value != expected:
+                raise RuntimeError(f"{name} benchmark program disagrees")
         results["corpora"].append(row)
         print(f"{size} leaves: plain {row['plain']['median_ms']:.3f} ms, "
-              f"proof {row['proof']['median_ms']:.3f} ms, OCaml {row['ocaml']['median_ms']:.3f} ms")
+              f"proof {row['proof']['median_ms']:.3f} ms, "
+              f"transport {row['transport']['median_ms']:.3f} ms, OCaml {row['ocaml']['median_ms']:.3f} ms")
     (out / "results.json").write_text(json.dumps(results, indent=2) + "\n")
     print(f"Informational results: {out / 'results.json'}")
 

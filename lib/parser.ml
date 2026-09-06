@@ -145,6 +145,14 @@ and term budget names tree =
       let* body = term budget (name :: names) body in
       Ok (Let (r, a, value, body))
   | List [Atom "refl"; a] -> Result.map (fun a -> Refl a) (term budget names a)
+  | List [Atom "transport"; List [Atom name; family]; a; b; proof; value] ->
+      let* () = binder name in
+      let* family = ty budget (name :: names) family in
+      let* a = term budget names a in
+      let* b = term budget names b in
+      let* proof = term budget names proof in
+      let* value = term budget names value in
+      Ok (Transport (family, a, b, proof, value))
   | List [Atom "ann"; a; t] ->
       let* a = term budget names a in
       let* t = ty budget names t in
