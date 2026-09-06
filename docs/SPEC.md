@@ -49,9 +49,10 @@ numbers suitable for unchecked budget arithmetic.
 `bool` is distinct from `u32`. The three comparisons accept u32 operands and
 return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
-two u32 branches. Both branches are checked in the enclosing phase, including
-an unreachable branch. At runtime the condition is evaluated first and only
-the selected branch executes. Function-valued and boolean-valued branches are
+two branches of the same scalar type, either u32 or bool. Both branches are
+checked in the enclosing phase, including an unreachable branch. At runtime
+the condition is evaluated first and only
+the selected branch executes. Function-valued and product-valued branches are
 not supported in this slice. Internal functions and lets can bind booleans;
 the export ABI remains exclusively `u32 -> ... -> u32`.
 
@@ -97,7 +98,7 @@ expansion represents a pair as two compiler values, retaining scalar instruction
 from both fields in evaluation order, including an unselected field. Pair
 construction and projection consume compilation budget but allocate no Wasm
 object or extra local of their own. Field computations still count toward local
-limits. The integer export ABI and u32-only conditional branches are unchanged.
+limits. The integer export ABI is unchanged; conditional results remain scalar.
 This representation relies on static shapes and the pure, terminating fragment;
 it is not a general object ABI.
 
@@ -105,6 +106,22 @@ it is not a general object ABI.
 checks the immutable allowlist {7, 9} and price ceiling 100. It returns 1 or 0,
 uses no amount arithmetic, and supplies no host authority or refined evidence.
 Named records, sums, dependent pairs, and transport remain future work.
+
+## M1 budget policy
+
+Boolean-valued conditionals compose predicates without converting through u32.
+Their typing, conversion, erasure, and branch evaluation follow the scalar rules
+above, and they use the existing i32 branch representation.
+
+`examples/budget-policy.aw` accepts spent, proposed, and ceiling as u32 inputs.
+It returns 1 exactly when the mathematical sum of spent and proposed is at most
+ceiling. It first computes the modular total, then returns false if total is
+less than spent; otherwise it checks total against ceiling. For two u32 inputs,
+an overflowing sum wraps exactly once and its wrapped value is strictly less
+than spent. This detects overflow even when the wrapped value fits the ceiling.
+The source `add` operation remains modular. The example reports a decision,
+without distinguishing overflow from an exceeded ceiling or constructing erased
+evidence. Structured validation errors remain future work.
 
 ## Checking
 

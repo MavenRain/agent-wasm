@@ -36,6 +36,18 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "boolean conditional composition", (fun () -> accepted
+    "(if (if true false true) 1 2)");
+  "boolean conditional conversion", (fun () -> accepted
+    "(let (erase p (eq (if (if false true (u32-le 5 5)) 7 8) 7)) (refl 7) 0)");
+  "boolean conditional substitution", (fun () -> accepted
+    "(app erase (app run (fn (run b bool) (fn (erase p (eq (if (if b false true) 7 8) 8)) 0)) true) (refl 8))");
+  "boolean conditional mismatch", (fun () -> rejected Type_mismatch "(if true false 0)");
+  "boolean conditional export", (fun () -> rejected Unsupported_export "(if true false true)");
+  "boolean dead branch erased use", (fun () -> rejected (Erased_use 0)
+    "(let (erase b bool) true (if (if true false b) 1 0))");
+  "matching product branches rejected", (fun () -> rejected Type_mismatch
+    "(fst (if true (pair 1 2) (pair 3 4)))");
   "strict comparison equal conversion", (fun () -> accepted
     "(let (erase p (eq (if (u32-lt 5 5) 1 2) 2)) (refl 2) 0)");
   "inclusive comparison equal conversion", (fun () -> accepted

@@ -75,8 +75,9 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 # 0
 ```
 
-Comparisons produce internal booleans and `if` selects a u32 branch. Sums and
-validators returning values with erased evidence remain on the M1 roadmap.
+Comparisons produce internal booleans and `if` selects matching u32 or bool
+branches. Sums and validators returning values with erased evidence remain
+on the M1 roadmap.
 
 This slice adds `(product A B)`, `(pair a b)`, `fst`, and `snd` for internal
 data. `examples/tool-policy.aw` packages a tool ID and price, then checks IDs 7
@@ -92,6 +93,20 @@ node scripts/run.mjs artifacts/tool-policy.wasm 8 100
 
 Both pair fields evaluate eagerly. The public ABI still accepts and returns
 integers; this example returns a decision without granting host authority.
+
+Boolean branches let predicates compose. `examples/budget-policy.aw` accepts
+spent, proposed, and ceiling, returning 1 only when their non-wrapping sum fits:
+
+```sh
+_build/default/bin/main.exe compile examples/budget-policy.aw artifacts/budget-policy.wasm
+node scripts/run.mjs artifacts/budget-policy.wasm 60 40 100
+# 1
+node scripts/run.mjs artifacts/budget-policy.wasm 4294967295 1 100
+# 0
+```
+
+The example detects overflow before comparing the modular total with the ceiling.
+It returns a decision; structured errors and evidence-bearing results remain open.
 
 ## Validate
 

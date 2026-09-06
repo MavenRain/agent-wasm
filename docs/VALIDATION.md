@@ -165,6 +165,29 @@ create no new output. Backend limit tests count work in unselected fields and
 across both fields of a pair. No new performance measurement or mechanized
 preservation claim accompanies this slice.
 
+## M1 boolean predicates and budget policy, 2026-09-06
+
+Validated in the workspace copy:
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 91 cases, 0 failures
+  e2e: 331 programs, 662 host executions, erasure and rejection checks passed
+```
+
+Seven added kernel cases cover boolean conditional composition, conversion,
+dependent substitution, mismatched branches, export restrictions, erased use
+in an unreachable boolean branch, and matching product-branch rejection. Five differential programs exercise nested boolean branches and
+use their results repeatedly with branch-local computations.
+
+The actual budget-policy file executes on both hosts for 108 combinations of
+spent, proposed, and ceiling. An independent oracle uses exact JavaScript number
+addition over the two u32 inputs, without reproducing the modular overflow test.
+Cases include zero, exact ceilings, maximum u32, and sums crossing both the
+signed boundary and the u32 limit. Existing local-limit and erasure checks pass.
+No new benchmark or mechanized preservation claim accompanies this slice.
+
 ## Initial performance evidence
 
 Command: `opam exec -- python3 -P scripts/bench.py`.

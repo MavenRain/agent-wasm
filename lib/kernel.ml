@@ -142,9 +142,12 @@ and infer budget phase context term =
       Ok Bool
   | If (c, a, b) ->
       let* () = check_term budget phase context c Bool in
-      let* () = check_term budget phase context a U32 in
-      let* () = check_term budget phase context b U32 in
-      Ok U32
+      let* ty = infer budget phase context a in
+      (match ty with
+       | U32 | Bool ->
+           let* () = check_term budget phase context b ty in
+           Ok ty
+       | Product _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Add (a, b) ->
       let* () = check_term budget phase context a U32 in
       let* () = check_term budget phase context b U32 in

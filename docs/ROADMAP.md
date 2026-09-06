@@ -33,6 +33,12 @@ tool-policy example packages a proposed action and checks immutable tool IDs
 and a price ceiling, returning an integer decision. Evidence-bearing validation
 and named records remain open.
 
+Implemented third slice: boolean-valued conditionals compose scalar predicates.
+The budget-policy example detects u32 addition overflow before checking a ceiling,
+so wrapping cannot turn an excessive proposal into an accepted one. It returns
+an integer decision; distinct overflow errors and evidence-bearing results remain
+open.
+
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported
 fragment before calling it verified. Use adversarial examples and an independent

@@ -102,6 +102,23 @@ for (const op of ['u32-eq', 'u32-lt', 'u32-le']) {
     }
   }
 }
+for (const x of [0, 1, 100, 0x80000000, 0xffffffff]) {
+  cases.push({ name: `boolean-conditional-${x}`, body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'b', 'bool'],
+      ['if', ['u32-lt', 'x', 100], ['u32-eq', ['add', 'x', 1], 2],
+        ['if', ['u32-le', 'x', 0x80000000], 'true', 'false']],
+      ['add', ['if', 'b', 17, 23], ['if', ['if', 'b', 'false', 'true'], 100, 200]]]], args: [x] });
+}
+for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  for (const proposed of [0, 1, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
+    for (const ceiling of [0, 100, 0xffffffff]) {
+      // JS addition is exact over two u32 inputs, independently of modular detection.
+      cases.push({ name: `budget-policy-${spent}-${proposed}-${ceiling}`,
+        file: 'examples/budget-policy.aw', body: Number(spent + proposed <= ceiling),
+        args: [spent, proposed, ceiling], expected: Number(spent + proposed <= ceiling) });
+    }
+  }
+}
 for (const flag of ['true', 'false']) {
   cases.push({ name: `boolean-closure-${flag}`, body:
     ['app', 'run', ['fn', ['run', 'b', 'bool'],
@@ -168,8 +185,11 @@ try {
     const module = new WebAssembly.Module(bytes);
     assert.deepEqual(WebAssembly.Module.imports(module), [], 'unexpected host authority');
     const { exports } = new WebAssembly.Instance(module, {});
-    let expected = interpret(test.body);
-    for (const argument of test.args) expected = expected(argument);
+    let expected = test.expected;
+    if (expected === undefined) {
+      expected = interpret(test.body);
+      for (const argument of test.args) expected = expected(argument);
+    }
     assert.equal(exports.main(...test.args) >>> 0, expected, `${test.name}: Node/reference`);
     const result = run('wasmtime', ['run', '-C', 'cache=n', '--invoke', 'main', output, ...test.args.map((n) => String(n | 0))]).trim();
     assert.equal(Number(result) >>> 0, expected, `${test.name}: Wasmtime/reference`);
