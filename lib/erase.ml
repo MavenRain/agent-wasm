@@ -31,6 +31,7 @@ let run budget checked =
         let* a = zero a in
         let* b = zero b in
         Ok (Pair (Const 1L, Pair (a, b)))
+    | Ast.Refine (a, _) -> zero a
     | Ast.Eq _ | Ast.Pi _ -> Error (Backend "unsupported sum payload")
   in
   let rec walk scope depth term =
@@ -64,6 +65,8 @@ let run budget checked =
         Ok (Pair (a, b))
     | Ast.Fst a -> Result.map (fun a -> Fst a) (walk scope depth a)
     | Ast.Snd a -> Result.map (fun a -> Snd a) (walk scope depth a)
+    | Ast.Pack (_, value, _) | Ast.Value value -> walk scope depth value
+    | Ast.Evidence _ -> Error Runtime_proof
     | Ast.Compare (op, a, b) ->
         let op = match op with Ast.Equal -> Equal | Ast.Less -> Less | Ast.Less_equal -> Less_equal in
         let* a = walk scope depth a in

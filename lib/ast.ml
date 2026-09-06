@@ -2,7 +2,15 @@ type relevance = Runtime | Erased
 
 type comparison = Equal | Less | Less_equal
 
-type ty = U32 | Bool | Product of ty * ty | Sum of ty * ty | Eq of term * term | Pi of relevance * ty * ty
+type ty =
+  | U32
+  | Bool
+  | Product of ty * ty
+  | Sum of ty * ty
+  (* Only the evidence family binds the erased payload. *)
+  | Refine of ty * ty
+  | Eq of term * term
+  | Pi of relevance * ty * ty
 and term =
   | Var of int
   | Lit of int64
@@ -13,6 +21,10 @@ and term =
   | Pair of term * term
   | Fst of term
   | Snd of term
+  (* The annotation is a complete refinement type; neither term binds. *)
+  | Pack of ty * term * term
+  | Value of term
+  | Evidence of term
   | Inl of ty * term
   | Inr of ty * term
   (* The result type is outside both payload binders. *)
@@ -61,6 +73,13 @@ let rec map_term budget variable depth term =
       Ok (Pair (a, b))
   | Fst a -> Result.map (fun a -> Fst a) (map_term budget variable depth a)
   | Snd a -> Result.map (fun a -> Snd a) (map_term budget variable depth a)
+  | Pack (ty, value, proof) ->
+      let* ty = map_ty budget variable depth ty in
+      let* value = map_term budget variable depth value in
+      let* proof = map_term budget variable depth proof in
+      Ok (Pack (ty, value, proof))
+  | Value a -> Result.map (fun a -> Value a) (map_term budget variable depth a)
+  | Evidence a -> Result.map (fun a -> Evidence a) (map_term budget variable depth a)
   | Compare (op, a, b) ->
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
@@ -112,6 +131,10 @@ and map_ty budget variable depth ty =
       let* a = map_ty budget variable depth a in
       let* b = map_ty budget variable depth b in
       Ok (Product (a, b))
+  | Refine (a, proof) ->
+      let* a = map_ty budget variable depth a in
+      let* proof = map_ty budget variable (depth + 1) proof in
+      Ok (Refine (a, proof))
   | Eq (a, b) ->
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in

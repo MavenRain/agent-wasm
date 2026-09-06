@@ -36,13 +36,132 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "refinement fixed compilation budget", (fun () ->
+    let source = "(export main (fn (run n u32) (value (case (refine (x u32) (eq x n)) (if (u32-eq n 0) (inl bool n) (inr u32 false)) (a (pack (refine (x u32) (eq x n)) n (refl n))) (b (pack (refine (x u32) (eq x n)) n (refl n)))))))" in
+    let* artifact = Compiler.compile ~fuel:332 source in
+    let* () = if artifact.steps = 332 then Ok () else Error (Backend "refinement budget changed") in
+    Result.fold ~ok:(fun _ -> Error (Backend "refinement fuel boundary accepted"))
+      ~error:(function Budget_exhausted -> Ok () | e -> Error e)
+      (Compiler.compile ~fuel:331 source));
+  "refinement scalar erasure", (fun () -> same_output
+    "(fn (run n u32) (value (pack (refine (x u32) (eq x (add n 1))) (add n 1) (refl (add n 1)))))"
+    "(fn (run n u32) (add n 1))");
+  "refinement abstract evidence", (fun () -> accepted
+    "(fn (run n u32) (let (run p (refine (x u32) (eq x n))) (pack (refine (x u32) (eq x n)) n (refl n)) (let (erase e (eq (value p) n)) (evidence p) (value p))))");
+  "refinement proof can be erased variable", (fun () -> same_output
+    "(fn (run n u32) (let (erase e (eq n n)) (refl n) (value (pack (refine (x u32) (eq x n)) n e))))"
+    "(fn (run n u32) n)");
+  "refinement product payload", (fun () -> same_output
+    "(fn (run n u32) (snd (value (pack (refine (p (product bool u32)) (eq (snd p) n)) (pair true n) (refl n)))))"
+    "(fn (run n u32) (snd (pair true n)))");
+  "refinement boolean payload", (fun () -> accepted
+    "(if (value (pack (refine (b bool) (eq (if b 1 0) 1)) true (refl 1))) 7 9)");
+  "refinement nested payload", (fun () -> accepted
+    "(value (value (pack (refine (p (refine (x u32) (eq x 7))) (eq (value p) 7)) (pack (refine (x u32) (eq x 7)) 7 (refl 7)) (refl 7))))");
+  "refinement false proof", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack (refine (x u32) (eq x 7)) 8 (refl 7)))");
+  "refinement wrong proof type", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack (refine (x u32) (eq x 7)) 7 7))");
+  "refinement wrong payload", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack (refine (x u32) (eq x 7)) true (refl 7)))");
+  "refinement annotation required", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack u32 7 (refl 7)))");
+  "refinement family must be equality", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack (refine (x u32) u32) 7 7))");
+  "refinement bad equality index", (fun () -> kernel_rejects Type_mismatch
+    "(value (pack (refine (x bool) (eq x x)) true (refl 7)))");
+  "refinement function payload rejected", (fun () -> kernel_rejects Type_mismatch
+    "(pack (refine (f (pi (run x u32) u32)) (eq (app run f 0) 0)) (fn (run x u32) x) (refl 0))");
+  "refinement evidence payload rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (refine (x (eq 0 0)) (eq 0 0))) 0)");
+  "refinement runtime evidence", (fun () -> kernel_rejects Runtime_proof
+    "(evidence (pack (refine (x u32) (eq x 7)) 7 (refl 7)))");
+  "refinement erased payload", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase n u32) 7 (value (pack (refine (x u32) (eq x n)) n (refl n))))");
+  "refinement erased package", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase p (refine (x u32) (eq x 7))) (pack (refine (x u32) (eq x 7)) 7 (refl 7)) (value p))");
+  "refinement ghost package evidence", (fun () -> same_output
+    "(let (erase p (refine (x u32) (eq x 7))) (pack (refine (x u32) (eq x 7)) 7 (refl 7)) (let (erase e (eq (value p) 7)) (evidence p) 42))"
+    "42");
+  "refinement value needs package", (fun () -> kernel_rejects Type_mismatch "(value 7)");
+  "refinement evidence needs package", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase e (eq 7 7)) (evidence 7) 0)");
+  "refinement export", (fun () -> kernel_rejects Unsupported_export
+    "(pack (refine (x u32) (eq x 7)) 7 (refl 7))");
+  "refinement export parameter", (fun () -> kernel_rejects Unsupported_export
+    "(fn (run p (refine (x u32) (eq x 7))) (value p))");
+  "refinement closed value conversion", (fun () -> accepted
+    "(let (erase e (eq (value (pack (refine (x u32) (eq x 7)) (add 3 4) (refl 7))) 7)) (refl 7) 0)");
+  "refinement closed evidence conversion", (fun () -> accepted
+    "(let (erase e (eq (transport (i u32) 7 7 (evidence (pack (refine (x u32) (eq x 7)) 7 (refl 7))) 9) 9)) (refl 9) 0)");
+  "refinement open value stays symbolic", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase f (pi (run p (refine (x u32) (eq x 7))) (eq (value p) 7))) (fn (run p (refine (x u32) (eq x 7))) (refl 7)) 0)");
+  "refinement open evidence stays symbolic", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase f (pi (run p (refine (x u32) (eq x 7))) (eq (transport (i u32) (value p) 7 (evidence p) 9) 9))) (fn (run p (refine (x u32) (eq x 7))) (refl 9)) 0)");
+  "refinement open projections normalize", (fun () -> accepted
+    "(let (erase f (pi (run p (refine (x u32) (eq x 7))) (eq (value (app run (fn (run q (refine (x u32) (eq x 7))) q) p)) (value p)))) (fn (run p (refine (x u32) (eq x 7))) (refl (value p))) 0)");
+  "refinement transport indexed family", (fun () -> accepted
+    "(let (erase f (pi (erase a u32) (pi (erase b u32) (pi (erase e (eq a b)) (pi (run p (refine (x u32) (eq x a))) (refine (x u32) (eq x b))))))) (fn (erase a u32) (fn (erase b u32) (fn (erase e (eq a b)) (fn (run p (refine (x u32) (eq x a))) (transport (i (refine (x u32) (eq x i))) a b e p))))) 0)");
+  "refinement transport sum family", (fun () -> accepted
+    "(let (erase f (pi (erase a u32) (pi (erase b u32) (pi (erase e (eq a b)) (pi (run s (sum bool (refine (x u32) (eq x a)))) (sum bool (refine (x u32) (eq x b)))))))) (fn (erase a u32) (fn (erase b u32) (fn (erase e (eq a b)) (fn (run s (sum bool (refine (x u32) (eq x a)))) (transport (i (sum bool (refine (x u32) (eq x i)))) a b e s))))) 0)");
+  "refinement transport at execute erases to payload", (fun () -> same_output
+    "(fn (run n u32) (let (erase same (eq (add n 1) (add n 1))) (refl (add n 1)) (value (transport (i (refine (item u32) (eq item i))) (add n 1) (add n 1) same (pack (refine (item u32) (eq item (add n 1))) (add n 1) same)))))"
+    "(fn (run n u32) (add n 1))");
+  "refinement inactive alternative zero fill", (fun () -> same_output
+    "(fn (run n u32) (case u32 (inr (refine (p (product u32 u32)) (eq (fst p) 0)) n) (a (fst (value a))) (b b)))"
+    "(fn (run n u32) (case u32 (inr (product u32 u32) n) (a (fst a)) (b b)))");
+  "refinement projection stuck on if", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run c bool) (let (erase e (eq (value (if c (pack (refine (item u32) (eq item 7)) 7 (refl 7)) (pack (refine (item u32) (eq item 7)) 7 (refl 7)))) 7)) (refl 7) 7))");
+  "refinement family checked inside sum", (fun () -> kernel_rejects Type_mismatch
+    "(case u32 (inl (refine (x u32) (eq true x)) 7) (x x) (p 0))");
+  "refinement nested family checked", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (refine (x (refine (y u32) (eq true y))) (eq 0 0))) 0)");
+  "refinement case result family checked", (fun () -> kernel_rejects Type_mismatch
+    "(value (case (refine (x u32) (eq true x)) (inl u32 0) (a (pack (refine (x u32) (eq x x)) a (refl a))) (b (pack (refine (x u32) (eq x x)) b (refl b)))))");
+  "refinement case result formation before conversion", (fun () -> kernel_rejects Type_mismatch
+    "(value (case (refine (x u32) (eq (if true x false) x)) (inl u32 0) (a (pack (refine (x u32) (eq x x)) a (refl a))) (b (pack (refine (x u32) (eq x x)) b (refl b)))))");
+  "refinement indexed case result", (fun () -> accepted
+    "(fn (run n u32) (value (case (refine (x u32) (eq x n)) (inl bool 0) (a (pack (refine (x u32) (eq x n)) n (refl n))) (b (pack (refine (x u32) (eq x n)) n (refl n))))))");
+  "refinement branch evidence mismatch", (fun () -> kernel_rejects Type_mismatch
+    "(value (if true (pack (refine (x u32) (eq x 7)) 7 (refl 7)) (pack (refine (x u32) (eq x 8)) 8 (refl 8))))");
+  "refinement no comparison reflection", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run n u32) (if (u32-eq n 7) (value (pack (refine (x u32) (eq x 7)) n (refl n))) 0))");
+  "refinement binder reserved", (fun () -> rejected (Parse "binder name is reserved for literals")
+    "(value (pack (refine (true u32) (eq 7 7)) 7 (refl 7)))");
+  "refinement binder absent from payload", (fun () -> rejected (Unknown_name "x")
+    "(value (pack (refine (x u32) (eq x x)) x (refl 7)))");
+  "refinement binder absent from proof", (fun () -> rejected (Unknown_name "x")
+    "(value (pack (refine (x u32) (eq x x)) 7 (refl x)))");
+  "refinement substitution through nested binders", (fun () ->
+    let open Ast in
+    let inner = Refine (U32, Eq (Var 0, Var 1)) in
+    let outer = Refine (inner, Eq (Value (Var 0), Var 1)) in
+    let replacement = Add (Var 0, Lit 1L) in
+    let* actual = subst_ty (Budget.create 1000) replacement outer in
+    let lifted = Add (Var 1, Lit 1L) in
+    let expected = Refine (Refine (U32, Eq (Var 0, lifted)),
+      Eq (Value (Var 0), lifted)) in
+    if actual = expected then Ok () else Error (Backend "refinement family capture"));
+  "refinement constructor has no binder", (fun () ->
+    let open Ast in
+    let annotation = Refine (U32, Eq (Var 0, Var 1)) in
+    let body = Pack (annotation, Var 0, Evidence (Var 0)) in
+    let replacement = Value (Var 0) in
+    let* actual = subst_term (Budget.create 1000) replacement body in
+    let expected = Pack (Refine (U32, Eq (Var 0, Value (Var 1))),
+      replacement, Evidence replacement) in
+    if actual = expected then Ok () else Error (Backend "refinement constructor capture"));
+  "sum stuck handler binder capture", (fun () -> accepted
+    "(fn (run w u32) (let (erase p (eq (fst (app run (fn (run s (sum u32 u32)) (case (product u32 u32) s (x (pair x w)) (y (pair y y)))) (inl u32 1))) 1)) (refl 1) 0))");
+  "sum stuck handler wrong endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run w u32) (let (erase p (eq (fst (app run (fn (run s (sum u32 u32)) (case (product u32 u32) s (x (pair x w)) (y (pair y y)))) (inl u32 1))) 2)) (refl 2) 0))");
   "sum fixed compilation budget", (fun () ->
     let source = "(export main (fst (case (product u32 bool) (if true (inl bool (add 1 2)) (inr u32 false)) (x (pair x true)) (b (pair 0 b)))))" in
-    let* artifact = Compiler.compile ~fuel:182 source in
-    let* () = if artifact.steps = 182 then Ok () else Error (Backend "sum budget changed") in
+    let* artifact = Compiler.compile ~fuel:217 source in
+    let* () = if artifact.steps = 217 then Ok () else Error (Backend "sum budget changed") in
     Result.fold ~ok:(fun _ -> Error (Backend "sum fuel boundary accepted"))
       ~error:(function Budget_exhausted -> Ok () | e -> Error e)
-      (Compiler.compile ~fuel:181 source));
+      (Compiler.compile ~fuel:216 source));
   "sum open branches normalize", (fun () -> accepted
     "(app run (fn (run s (sum u32 u32)) (let (erase p (eq (case u32 s (x (add 1 2)) (y (add 3 4))) (case u32 s (x 3) (y 7)))) (refl (case u32 s (x 3) (y 7))) 0)) (inl u32 7))");
   "sum transported shape", (fun () -> accepted

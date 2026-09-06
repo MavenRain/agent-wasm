@@ -7,8 +7,8 @@ constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
 arithmetic, booleans, unsigned comparisons, conditional branches, pairs, sums,
-case analysis, dependent
-function types, erased arguments, equality evidence, and equality transport.
+case analysis, refined values with erased evidence, dependent function types,
+erased arguments, equality evidence, and equality transport.
 It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
 cryptography, or persistence. Proof checking and erasure are tested, not formally
 proved. OCaml-speed compilation remains a project acceptance requirement.
@@ -77,8 +77,8 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 ```
 
 Comparisons produce internal booleans and `if` selects matching u32, bool,
-or nested product and sum branches. Validators returning erased evidence remain
-on the M1 roadmap.
+or nested product, sum, and refined-value branches. Proving that an executable
+validator's acceptance condition succeeded remains on the M1 roadmap.
 
 This slice adds `(product A B)`, `(pair a b)`, `fst`, and `snd` for internal
 data. `examples/tool-policy.aw` packages a tool ID and price, then checks IDs 7
@@ -137,9 +137,33 @@ node scripts/run.mjs artifacts/budget-sum.wasm 4294967295 1 100 0
 # 1
 ```
 
-Sum payloads can contain scalars, products, and nested sums. Function and proof
-payloads are not yet supported. Internal sums use a tag and payload slots;
-the public ABI remains integers.
+Sum payloads can contain scalars, products, nested sums, and refined values.
+Functions and bare proof payloads are excluded. Internal sums use a tag and
+payload slots; the public ABI remains integers.
+
+Refined values package a runtime payload with erased equality evidence:
+
+```lisp
+(pack (refine (x u32) (eq x (add n 1)))
+  (add n 1)
+  (refl (add n 1)))
+```
+
+`value` retrieves the payload;
+`evidence` retrieves its proof in a ghost context.
+The explicit refinement binder scopes only its equality family. Packages can
+travel through internal sums, conditionals, and functions. Their proofs are
+checked before erasure, and only their payloads reach Wasm.
+
+```sh
+_build/default/bin/main.exe compile examples/refined-increment.aw artifacts/refined.wasm
+node scripts/run.mjs artifacts/refined.wasm 41
+# 42
+```
+
+This example proves its payload equals the modular increment expression.
+Comparisons still do not introduce branch proofs, so it does not establish
+overflow freedom or successful policy checks.
 
 Equality transport rewrites a type family using checked evidence:
 `(transport (index FAMILY) from to proof value)` takes a value of `FAMILY[from]`

@@ -24,8 +24,20 @@ function interpret(tree, env = new Map()) {
     case 'inr': return { side: 'right', value: interpret(tree[2], env) };
     case 'case': {
       const value = interpret(tree[2], env);
+      assert(value && (value.side === 'left' || value.side === 'right'), 'reference: invalid sum tag');
       const [name, body] = tree[value.side === 'left' ? 3 : 4];
       return interpret(body, new Map([...env, [name, value.value]]));
+    }
+    case 'pack': return { kind: 'refinement', value: interpret(tree[2], env), proof: interpret(tree[3], env) };
+    case 'value': {
+      const packageValue = interpret(tree[1], env);
+      assert.equal(packageValue?.kind, 'refinement', 'reference: value requires a refinement');
+      return packageValue.value;
+    }
+    case 'evidence': {
+      const packageValue = interpret(tree[1], env);
+      assert.equal(packageValue?.kind, 'refinement', 'reference: evidence requires a refinement');
+      return packageValue.proof;
     }
     case 'pair': return [interpret(tree[1], env), interpret(tree[2], env)];
     case 'fst': return interpret(tree[1], env)[0];
@@ -48,10 +60,12 @@ function interpret(tree, env = new Map()) {
 let seed = 20260906;
 const random = (n) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed % n; };
 let fresh = 0;
+const refinedU32 = ['refine', ['item', 'u32'], ['eq', 'item', 'item']];
+const packU32 = (value) => ['pack', refinedU32, value, ['refl', value]];
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(8)) {
+  switch (random(12)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -69,11 +83,107 @@ function generate(depth, names) {
       ['inl', 'u32', generate(depth - 1, names)], ['inr', 'u32', generate(depth - 1, names)]],
       [name, generate(depth - 1, [...names, name])],
       [name, generate(depth - 1, [...names, name])]];
+    case 8: return ['value', packU32(generate(depth - 1, names))];
+    case 9: return ['let', ['run', name, refinedU32],
+      ['if', ['u32-lt', generate(depth - 1, names), 0x80000000],
+        packU32(generate(depth - 1, names)), packU32(generate(depth - 1, names))],
+      ['let', ['erase', `proof${fresh++}`, ['eq', ['value', name], ['value', name]]],
+        ['evidence', name], ['add', ['value', name], generate(depth - 1, names)]]];
+    case 10: {
+      const value = generate(depth - 1, names);
+      const fields = ['refine', ['fields', ['product', 'bool', 'u32']],
+        ['eq', ['snd', 'fields'], ['snd', 'fields']]];
+      return ['snd', ['value', ['pack', fields,
+        ['pair', ['u32-le', value, 0x80000000], value], ['refl', value]]]];
+    }
+    case 11: return ['case', 'u32', ['if', ['u32-lt', generate(depth - 1, names), 0x80000000],
+      ['inl', refinedU32, packU32(generate(depth - 1, names))],
+      ['inr', refinedU32, packU32(generate(depth - 1, names))]],
+      [name, ['value', name]], [name, ['add', ['value', name], generate(depth - 1, names)]]];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const x of [0, 1, 99, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  const next = ['add', 'x', 1];
+  const indexed = ['refine', ['item', 'u32'], ['eq', 'item', next]];
+  cases.push({ name: `refined-increment-${x}`, file: 'examples/refined-increment.aw',
+    args: [x], expected: (x + 1) >>> 0 });
+  cases.push({ name: `refined-indexed-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'],
+      ['let', ['erase', 'outerProof', ['eq', next, next]], ['refl', next],
+        ['let', ['run', 'package', indexed], ['pack', indexed, next, 'outerProof'],
+          ['let', ['erase', 'checked', ['eq', ['value', 'package'], next]], ['evidence', 'package'],
+            ['let', ['run', 'f', ['pi', ['run', 'extra', 'u32'], 'u32']],
+              ['fn', ['run', 'extra', 'u32'], ['add', ['value', 'package'], ['add', 'x', 'extra']]],
+              ['add', ['app', 'run', 'f', 0], ['app', 'run', 'f', 0xffffffff]]]]]]] });
+  cases.push({ name: `refined-closure-argument-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'],
+      ['let', ['run', 'f', ['pi', ['run', 'package', refinedU32], 'u32']],
+        ['fn', ['run', 'package', refinedU32],
+          ['app', 'erase', ['fn', ['erase', 'proof', ['eq', ['value', 'package'], ['value', 'package']]],
+            ['add', ['value', 'package'], 'x']], ['evidence', 'package']]],
+        ['add', ['app', 'run', 'f', packU32(next)],
+          ['app', 'run', 'f', packU32(['add', 'x', 17])]]]] });
+  const fields = ['product', refinedU32, ['sum', 'u32', 'bool']];
+  const refinedFields = ['refine', ['fields', fields],
+    ['eq', ['value', ['fst', 'fields']], ['value', ['fst', 'fields']]]];
+  const leftFields = ['pair', packU32(next), ['inl', 'bool', ['add', 'x', 7]]];
+  const rightFields = ['pair', packU32(['add', 'x', 3]), ['inr', 'u32', ['u32-eq', 'x', 100]]];
+  cases.push({ name: `refined-product-if-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'package', refinedFields],
+      ['if', ['u32-lt', 'x', 100], ['pack', refinedFields, leftFields, ['refl', next]],
+        ['pack', refinedFields, rightFields, ['refl', ['add', 'x', 3]]]],
+      ['add', ['value', ['fst', ['value', 'package']]],
+        ['case', 'u32', ['snd', ['value', 'package']],
+          ['n', ['add', 'n', 'x']], ['flag', ['if', 'flag', 19, 23]]]]]] });
+  const rightPayload = ['product', 'bool', refinedU32];
+  const refinedSum = ['refine', ['choice', ['sum', refinedU32, rightPayload]], ['eq', 'x', 'x']];
+  cases.push({ name: `refined-sum-outer-proof-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'outerProof', ['eq', 'x', 'x']], ['refl', 'x'],
+      ['let', ['run', 'package', refinedSum], ['pack', refinedSum,
+        ['if', ['u32-lt', 'x', 100], ['inl', rightPayload, packU32(next)],
+          ['inr', refinedU32, ['pair', ['u32-eq', 'x', 100], packU32(['add', 'x', 9])]]], 'outerProof'],
+        ['let', ['erase', 'checked', ['eq', 'x', 'x']], ['evidence', 'package'],
+          ['case', 'u32', ['value', 'package'], ['p', ['value', 'p']],
+            ['fields', ['if', ['fst', 'fields'], ['value', ['snd', 'fields']],
+              ['add', ['value', ['snd', 'fields']], 'x']]]]]]]] });
+  cases.push({ name: `refined-case-result-outer-index-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'outerProof', ['eq', next, next]], ['refl', next],
+      ['let', ['run', 'package', indexed],
+        ['case', indexed, ['if', ['u32-lt', 'x', 100], ['inl', 'u32', 7], ['inr', 'u32', 11]],
+          ['left', ['pack', indexed, next, 'outerProof']],
+          ['right', ['let', ['erase', 'branchProof', ['eq', 'right', 'right']], ['refl', 'right'],
+            ['pack', indexed, next, 'outerProof']]]],
+        ['let', ['erase', 'checked', ['eq', ['value', 'package'], next]], ['evidence', 'package'],
+          ['value', 'package']]]]] });
+  cases.push({ name: `refined-transport-family-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'outerProof', ['eq', 'x', 'x']], ['refl', 'x'],
+      ['value', ['transport', ['index', ['refine', ['item', 'u32'], ['eq', 'item', ['add', 'index', 1]]]],
+        'x', 'x', 'outerProof', ['pack', indexed, next, ['refl', next]]]]]] });
+  cases.push({ name: `refined-erased-index-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['app', 'run', ['app', 'erase',
+      ['fn', ['erase', 'index', 'u32'], ['fn', ['run', 'payload', 'u32'],
+        ['let', ['erase', 'proof', ['eq', 'index', 'index']], ['refl', 'index'],
+          ['value', ['pack', ['refine', ['item', 'u32'], ['eq', 'index', 'index']], 'payload', 'proof']]]]],
+      'x'], next]] });
+  cases.push({ name: `refined-erased-package-evidence-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['erase', 'package', indexed],
+      ['pack', indexed, next, ['refl', next]],
+      ['let', ['erase', 'proof', ['eq', ['value', 'package'], next]], ['evidence', 'package'],
+        next]]] });
+  const flag = ['u32-lt', 'x', 100];
+  const booleanFamily = ['refine', ['flag', 'bool'],
+    ['eq', ['if', 'flag', 1, 0], ['if', 'flag', 1, 0]]];
+  cases.push({ name: `refined-boolean-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['if', ['value', ['pack', booleanFamily, flag,
+      ['refl', ['if', flag, 1, 0]]]], ['add', 'x', 3], ['add', 'x', 7]]] });
+  cases.push({ name: `refined-nested-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['value', ['value', ['pack',
+      ['refine', ['inner', refinedU32], ['eq', ['value', 'inner'], ['value', 'inner']]],
+      packU32(next), ['refl', next]]]]] });
+}
 for (const x of [0, 1, 99, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
   const sum = ['sum', ['product', 'bool', 'u32'], ['sum', 'u32', 'bool']];
   const value = ['if', ['u32-lt', 'x', 100],
@@ -232,6 +342,14 @@ for (let i = 0; i < 30; i++) {
     ['if', ['u32-lt', 'input', 0x80000000], transported, ['add', transported, 7]]],
     args: [random(0x100000000)] });
 }
+for (let i = 0; i < 30; i++) {
+  const value = generate(4, ['input']);
+  const family = ['refine', ['item', 'u32'], ['eq', 'item', value]];
+  cases.push({ name: `generated-refinement-${i}`, body: ['fn', ['run', 'input', 'u32'],
+    ['let', ['run', 'package', family], ['pack', family, value, ['refl', value]],
+      ['let', ['erase', 'proof', ['eq', ['value', 'package'], value]], ['evidence', 'package'],
+        ['add', ['value', 'package'], 'input']]]], args: [random(0x100000000)] });
+}
 let wide = 'x';
 for (let i = 0; i < 80; i++) wide = ['add', wide, i];
 cases.push({ name: 'large-sections', body: ['fn', ['run', 'x', 'u32'], wide], args: [13] });
@@ -264,6 +382,8 @@ function additions(count, leaf) {
   return ['add', additions(left, leaf), additions(count - 1 - left, leaf)];
 }
 cases.push({ name: 'local-limit', body: additions(50000, 1), args: [], fuel: '100000000' });
+cases.push({ name: 'refined-local-limit', body: ['value', packU32(additions(50000, 1))],
+  args: [], fuel: '100000000', sameWasm: 'local-limit' });
 cases.push({ name: 'sum-case-local-limit', body: ['case', 'u32', ['inr', 'u32', 7],
   ['x', additions(24999, 'x')], ['y', additions(25000, 'y')]], args: [], fuel: '100000000' });
 cases.push({ name: 'sum-if-local-limit', body: ['case', 'u32', ['if', 'false',
@@ -285,6 +405,10 @@ try {
     writeFileSync(input, test.file ? readFileSync(test.file) : `(export main ${source(test.body)})\n`);
     run(compiler, [...(test.fuel ? ['--fuel', test.fuel] : []), 'compile', input, output]);
     const bytes = readFileSync(output);
+    if (test.sameWasm) {
+      assert(bytes.equals(readFileSync(join(scratch, `${test.sameWasm}.wasm`))),
+        `${test.name}: refinement wrappers altered Wasm bytes`);
+    }
     assert(WebAssembly.validate(bytes), `${test.name}: invalid binary`);
     const module = new WebAssembly.Module(bytes);
     assert.deepEqual(WebAssembly.Module.imports(module), [], 'unexpected host authority');
@@ -310,6 +434,17 @@ try {
   assert(artifacts[0].equals(artifacts[3]), 'transport example altered Wasm bytes');
   assert.equal(run(compiler, ['ir', 'examples/increment.aw']), run(compiler, ['ir', 'examples/increment-plain.aw']));
   assert.equal(run(compiler, ['ir', 'examples/transport.aw']), run(compiler, ['ir', 'examples/increment-plain.aw']));
+
+  const refinedPlain = join(scratch, 'refined-increment-plain.aw');
+  writeFileSync(refinedPlain, '(export main (fn (run n u32) (let (run result u32) (add n 1) result)))\n');
+  const refinedArtifacts = [refinedPlain, 'examples/refined-increment.aw'].map((file, index) => {
+    const path = join(scratch, `refined-erasure-${index}.wasm`);
+    run(compiler, ['compile', file, path]);
+    return readFileSync(path);
+  });
+  assert(refinedArtifacts[0].equals(refinedArtifacts[1]), 'refinement evidence altered Wasm bytes');
+  assert.equal(run(compiler, ['ir', 'examples/refined-increment.aw']), run(compiler, ['ir', refinedPlain]),
+    'refinement evidence altered runtime IR');
 
   const output = join(scratch, 'rejected.wasm');
   for (const name of ['reject-false-proof', 'reject-erased-use']) {
@@ -346,6 +481,56 @@ try {
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
     assert(!existsSync(absent));
   }
+  const invalidFamily = ['refine', ['item', 'u32'], ['eq', 'true', 'true']];
+  const refinementRejections = [
+    { name: 'false-proof', body: ['value', ['pack', ['refine', ['item', 'u32'], ['eq', 'item', 0]], 1, ['refl', 1]]] },
+    { name: 'wrong-proof', body: ['value', ['pack', refinedU32, 1, ['refl', 2]]] },
+    { name: 'wrong-payload', body: ['value', ['pack', refinedU32, 'true', ['refl', 0]]] },
+    { name: 'erased-payload', body: ['let', ['erase', 'n', 'u32'], 7, ['value', packU32('n')]] },
+    { name: 'erased-package', body: ['let', ['erase', 'package', refinedU32], packU32(7), ['value', 'package']] },
+    { name: 'runtime-evidence', body: ['evidence', packU32(7)] },
+    { name: 'runtime-evidence-let', body: ['let', ['run', 'proof', ['eq', 7, 7]], ['evidence', packU32(7)], 42] },
+    { name: 'value-u32', body: ['value', 7] },
+    { name: 'evidence-u32', body: ['let', ['erase', 'proof', ['eq', 7, 7]], ['evidence', 7], 42] },
+    { name: 'non-refinement-pack', body: ['value', ['pack', 'u32', 7, ['refl', 7]]] },
+    { name: 'non-equality-family', body: ['value', ['pack', ['refine', ['item', 'u32'], 'u32'], 7, 7]] },
+    { name: 'proof-payload', body: ['let', ['erase', 'package',
+      ['refine', ['item', ['eq', 7, 7]], ['eq', 7, 7]]],
+      ['pack', ['refine', ['item', ['eq', 7, 7]], ['eq', 7, 7]], ['refl', 7], ['refl', 7]], 42] },
+    { name: 'function-payload', body: ['app', 'run', ['value', ['pack',
+      ['refine', ['item', ['pi', ['run', 'n', 'u32'], 'u32']], ['eq', 7, 7]],
+      ['fn', ['run', 'n', 'u32'], 'n'], ['refl', 7]]], 42] },
+    { name: 'sum-family-formation', body: ['case', 'u32', ['inl', invalidFamily, 7], ['n', 'n'], ['p', 42]] },
+    { name: 'sum-nested-family-formation', body: ['case', 'u32',
+      ['inr', ['product', 'bool', invalidFamily], 7], ['p', 42], ['n', 'n']] },
+    { name: 'case-family-formation', body: ['value', ['case', invalidFamily, ['inl', 'u32', 7],
+      ['left', packU32(7)], ['right', packU32(7)]]] },
+    { name: 'case-result-binder-scope', body: ['value', ['case',
+      ['refine', ['item', 'u32'], ['eq', 'item', 'left']], ['inl', 'u32', 7],
+      ['left', packU32(7)], ['right', packU32(7)]]] },
+    { name: 'pack-binder-scope-value', body: ['value', ['pack', refinedU32, 'item', ['refl', 7]]] },
+    { name: 'pack-binder-scope-proof', body: ['value', ['pack', refinedU32, 7, ['refl', 'item']]] },
+    { name: 'refinement-domain-binder-scope', body: ['value', ['pack',
+      ['refine', ['item', ['refine', ['inner', 'u32'], ['eq', 'inner', 'item']]], ['eq', 7, 7]],
+      packU32(7), ['refl', 7]]] },
+    { name: 'refinement-export-result', body: packU32(7) },
+    { name: 'refinement-export-argument', body: ['fn', ['run', 'package', refinedU32], ['value', 'package']] },
+    { name: 'refinement-binder-arity', body: ['value', ['pack',
+      ['refine', ['run', 'item', 'u32'], ['eq', 'item', 'item']], 7, ['refl', 7]]] },
+    { name: 'pack-arity', body: ['value', ['pack', refinedU32, 7]] },
+    { name: 'value-arity', body: ['value', packU32(7), 0] },
+    { name: 'evidence-arity', body: ['let', ['erase', 'proof', ['eq', 7, 7]], ['evidence', packU32(7), 0], 42] },
+  ];
+  for (const test of refinementRejections) {
+    writeFileSync(malformed, `(export main ${source(test.body)})`);
+    const absent = join(scratch, 'invalid-refinement.wasm');
+    for (const target of [output, absent]) {
+      assert.throws(() => run(compiler, ['compile', malformed, target]),
+        `refinement ${test.name}: accepted rejected program`);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact', `refinement ${test.name}: replaced artifact`);
+    assert(!existsSync(absent), `refinement ${test.name}: emitted artifact`);
+  }
   for (const text of ['', ')', '(export main 42', '(export main 42) trailing', '('.repeat(130) + ')'.repeat(130), 'x'.repeat(1048577)]) {
     writeFileSync(malformed, text);
     assert.throws(() => run(compiler, ['compile', malformed, output]));
@@ -362,6 +547,7 @@ try {
       ['fn', ['run', name, 'u32'], 42],
       ['let', ['erase', name, 'u32'], 1, 42],
       ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
+      ['value', ['pack', ['refine', [name, 'u32'], ['eq', 7, 7]], 7, ['refl', 7]]],
       ['case', 'u32', ['inl', 'u32', 7], [name, 0], ['y', 'y']],
       ['case', 'u32', ['inl', 'u32', 7], ['x', 'x'], [name, 0]],
       ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
@@ -376,7 +562,8 @@ try {
       assert(!existsSync(absent));
     }
   }
-  for (const body of [additions(50001, 1), ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
+  for (const body of [additions(50001, 1), ['value', packU32(additions(50001, 1))],
+    ['fn', ['run', 'x', 'u32'], additions(50000, 'x')],
     ['case', 'u32', ['inr', 'u32', 7],
       ['x', additions(25000, 'x')], ['y', additions(25000, 'y')]],
     ['case', 'u32', ['if', 'false', ['inl', 'u32', additions(24998, 1)],

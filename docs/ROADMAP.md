@@ -20,10 +20,11 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: add records and dependent pairs. Represent validation as an
-executable branch yielding
-either an error or a value with erased evidence. First domain example: a proposed
-tool action checked against an explicit immutable allowlist and price ceiling.
+Next: connect executable branches to evidence that their conditions succeeded,
+then add named records and general dependent pairs. Represent validation as a
+branch yielding either an error or a value with erased evidence. Domain example:
+a proposed tool action checked against an explicit immutable allowlist and price
+ceiling.
 Amounts need non-wrapping arithmetic or explicit overflow errors.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
@@ -58,7 +59,16 @@ handlers. Payloads and case results support nested scalar products and sums.
 The budget-sum example distinguishes error codes from successful totals using
 the type system, then adapts its result to the integer ABI. Lowering reuses
 products and executable conditionals with a tag and inactive payload storage.
-Named records, dependent pairs, and evidence-bearing results remain open.
+Named records and evidence about successful policy comparisons remain open.
+
+Implemented seventh slice: refined values pair a finite runtime payload with
+an erased dependent equality proof. Explicit pack, value, and evidence forms
+check construction and projection without introducing runtime wrappers.
+Refinements compose inside products, sums, conditionals, and case results;
+all indexed families are checked before erasure. The refined-increment example
+carries evidence of its modular result and emits the same IR and Wasm as the
+equivalent plain program. General dependent pairs and comparison-produced
+evidence remain open; an ordinary conditional does not refine its branches.
 
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported

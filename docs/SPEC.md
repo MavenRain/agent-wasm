@@ -20,12 +20,14 @@ JavaScript currently only hosts the emitted Wasm.
 program ::= (export main term)
 rel     ::= run | erase
 type    ::= u32 | bool | (product type type) | (sum type type)
+          | (refine (name type) type)
           | (eq term term) | (pi (rel name type) type)
 term    ::= integer | true | false | name
           | (add term term)
           | (pair term term) | (fst term) | (snd term)
           | (inl type term) | (inr type term)
           | (case type term (name term) (name term))
+          | (pack type term term) | (value term) | (evidence term)
           | (u32-eq term term) | (u32-lt term term) | (u32-le term term)
           | (if term term term)
           | (fn (rel name type) term)
@@ -42,7 +44,7 @@ Integer literals use one or more ASCII decimal digits and range from 0 through
 4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
 rejected. Tokens starting with a digit or sign are reserved for literals and
 cannot be used as binder names in functions, dependent function types, lets,
-transport families, or case handlers.
+transport families, refinement families, or case handlers.
 The boolean literals `true` and `false` are also reserved binder names.
 Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
@@ -53,13 +55,13 @@ numbers suitable for unchecked budget arithmetic.
 `bool` is distinct from `u32`. The three comparisons accept u32 operands and
 return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
-two branches of the same type: u32, bool, or nested products and sums of those
-types. Both branches are
-checked in the enclosing phase, including an unreachable branch. At runtime
+two branches of the same type: u32, bool, or nested products, sums, and
+refinements of those types. Both branches are checked in the enclosing phase,
+including an unreachable branch. At runtime
 the condition is evaluated first and only the selected branch executes.
-Function and evidence fields are not supported in conditional results, including
-inside nested products and sums. Internal functions and lets can bind booleans;
-the export ABI remains exclusively `u32 -> ... -> u32`.
+Function and runtime evidence fields are not supported in conditional results.
+Refinement evidence is checked and erased. Internal functions and lets bind
+booleans; the export ABI remains exclusively `u32 -> ... -> u32`.
 
 Conversion reduces closed comparisons and selects a branch when the normalized
 condition is a boolean literal. For an open condition it normalizes both branches
@@ -87,14 +89,66 @@ results.
 
 `examples/price-ceiling.aw` returns 1 when an input price is at most 100, else 0.
 It uses no arithmetic on amounts. This is an executable predicate, not yet the
-planned validator returning a sum with erased evidence. Records, dependent
-pairs, and non-wrapping amount operations remain future M1 work.
+planned validator proving its acceptance condition. Named records, general
+dependent pairs, and non-wrapping amount operations remain future M1 work.
+
+## M1 refined values
+
+`(refine (x A) P)` is a dependent pair with a runtime payload of type A and
+an erased equality proof of P. A has a finite shape built from u32, bool,
+products, sums, and refinements. Functions and bare equality evidence are
+excluded from its payload. P must be an `eq` type, well formed under the
+erased binder `x : A`. A is outside that binder. This is a restricted form
+of dependent pair, not a general Sigma type or an implicit refinement solver.
+
+`(pack R value proof)` requires an explicit refinement type R. The payload
+is checked in the enclosing phase against A, and the proof is checked in
+the ghost phase against P with `value` substituted for x. Neither term is
+inside the refinement binder. Incorrect evidence is rejected even when the
+package or an enclosing branch will be erased or unselected.
+
+`(value package)` returns its payload type, checking the package in the
+enclosing phase. `(evidence package)` is available only in the ghost phase:
+it checks the package there and returns P with `(value package)` substituted
+for x. An erased package cannot supply a runtime payload. Retrieving evidence
+does not unfold an abstract package or identify its value with an index by
+definitional conversion; explicit transport can use the projected proof.
+
+Conversion normalizes package annotations, values, and proofs. A value or
+evidence projection of a normalized pack selects the corresponding term;
+projections of open packages remain symbolic with normalized operands. There
+is no pair eta rule or proof irrelevance. Mapping and substitution traverse
+the proof family under its payload binder and constructor arguments in their
+original scope. Transport can rewrite equality indices inside refinements,
+including under sums, without changing runtime shape.
+
+Refinements are admitted in runtime products, sums, conditionals, and case
+results. Each sum alternative and the explicit case result are checked for
+well-formed indexed evidence as well as supported runtime shape. A case
+result is outside both handler binders and is shifted under each of them.
+The export ABI remains exclusively `u32 -> ... -> u32`.
+
+Erasure keeps only a pack's payload. The value projection erases to its
+operand, with no added binder, instruction, local, or runtime wrapper. An
+inactive sum alternative with a refined type stores only the zero-filled
+payload shape; it constructs no proof. Only checked terms enter erasure,
+and an evidence projection encountered at runtime is rejected. All formation,
+substitution, normalization, and erasure work shares the compilation budget.
+
+`examples/refined-increment.aw` packages the modular increment with evidence
+that its payload equals `(add n 1)`, retrieves that evidence in a ghost binding,
+and returns the payload. Its IR and Wasm match the equivalent plain let-bound
+increment. Existing comparisons and branches do not introduce equality proofs,
+so this slice cannot yet prove that a runtime policy condition succeeded or
+that addition did not overflow. It enables carrying checked evidence in
+structured results; branch evidence and executable refinement remain M1 work.
 
 ## M1 internal sums
 
 `(sum A B)` is a non-dependent tagged choice. Both payload types must be built
-from u32, bool, products, and sums, in either phase. Functions and equality
-evidence are excluded, even in an inactive alternative. `(inl B value)` infers
+from u32, bool, products, sums, and refinements, in either phase. Functions and
+bare equality evidence are excluded, even in an inactive alternative.
+Refinement families are checked in both alternatives. `(inl B value)` infers
 `(sum A B)` from `value : A`; `(inr A value)` infers it from `value : B`.
 The explicit type describes the other alternative. Injection evaluates its
 payload eagerly and checks it in the enclosing phase.
@@ -102,9 +156,10 @@ payload eagerly and checks it in the enclosing phase.
 `(case R value (left a) (right b))` requires `value : (sum A B)` and checks
 both handlers against the explicit result type R, with `left : A` and
 `right : B` bound separately. R is outside the payload binders and must also
-be built from scalar, product, and sum types. Both handlers are checked in
-the enclosing phase, including unreachable handlers. This is non-dependent
-elimination: selecting an alternative does not introduce equality evidence.
+be built from scalar, product, sum, and refinement types. Both handlers are
+checked in the enclosing phase, including unreachable handlers.
+This is non-dependent elimination: selecting an alternative does not
+introduce equality evidence.
 The export ABI still excludes sums and their payloads as structured values.
 
 Conversion normalizes the scrutinee. A known injection substitutes its payload
@@ -126,8 +181,8 @@ This representation uses no heap allocation and is internal to this compiler.
 `examples/budget-sum.aw` returns an internal `(sum u32 u32)`: left 1 for
 overflow, left 2 for exceeding the ceiling, or right with the accepted total.
 A final case adapts it to the scalar ABI: field 0 returns status, any other
-field returns the successful total or zero on error. Named error variants and
-payloads carrying erased evidence remain future work.
+field returns the successful total or zero on error. Named error variants remain
+future work. Refinements can carry separately checked evidence.
 
 ## M1 product slice
 
@@ -135,8 +190,9 @@ payloads carrying erased evidence remain future work.
 component types; `fst` and `snd` require a product and return the corresponding
 component. Components may be scalars, nested products, or internal functions.
 Both components are checked in the enclosing phase, even when only one is
-projected. Runtime products cannot contain equality evidence, including inside
-nested products. Ghost products may contain proofs and disappear when bound
+projected. Runtime products cannot contain bare equality evidence, including
+inside nested products; refinement fields keep only their payload at runtime.
+Ghost products may contain proofs and disappear when bound
 with `erase`; projecting an erased product at runtime is rejected.
 
 Evaluation constructs pairs eagerly, first the left component, then the right.
@@ -151,14 +207,15 @@ expansion represents a pair as two compiler values, retaining scalar instruction
 from both fields in evaluation order, including an unselected field. Pair
 construction and projection consume compilation budget but allocate no Wasm
 object or extra local of their own. Field computations still count toward local
-limits. The integer export ABI is unchanged; conditional results remain scalar.
+limits. The integer export ABI is unchanged; finite product shapes also support
+conditional results as described above.
 This representation relies on static shapes and the pure, terminating fragment;
 it is not a general object ABI.
 
 `examples/tool-policy.aw` packages a tool identifier and price as a pair and
 checks the immutable allowlist {7, 9} and price ceiling 100. It returns 1 or 0,
 uses no amount arithmetic, and supplies no host authority or refined evidence.
-Named records and dependent pairs remain future work.
+Named records and general dependent pairs remain future work.
 
 ## M1 budget policy
 
@@ -207,9 +264,9 @@ the shared compilation budget for ghost work.
 
 Transport supports abstract equality symmetry and transitivity without axioms.
 `examples/transport.aw` defines symmetry in a ghost binding and produces the
-same IR and Wasm as plain increment. Transport consumes evidence; comparisons
-still do not produce proofs or refine branches. Evidence-bearing executable
-validation remains future work.
+same IR and Wasm as plain increment. Transport consumes evidence, including
+projections from refined values. Comparisons still do not produce proofs or
+refine branches. Evidence-bearing executable validation remains future work.
 
 ## Checking
 

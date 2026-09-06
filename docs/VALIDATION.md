@@ -1,5 +1,61 @@
 # Compiler validation, 2026-09-06
 
+## M1 refined values, 2026-09-06
+
+Implemented on base commit `9b5b400` in an isolated workspace checkout:
+
+```text
+opam exec -- dunecho build
+  OK build: 0 errors, 0 warnings
+_build/default/test/kernel_test.exe
+  kernel: 208 cases, 0 failures
+node scripts/e2e.mjs
+  e2e: 966 programs, 1932 host executions, erasure and rejection checks passed
+
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+The 47 new kernel cases cover refinement formation, dependent proof checking,
+runtime payload and ghost evidence phases, projection conversion, nested binder
+substitution, transport through refinement and sum families, export rejection,
+and malformed families hidden in sum alternatives or case result annotations.
+One malformed case family has an ill-typed endpoint that normalizes to a valid
+one, pinning formation before conversion. The earlier unpinned case-handler
+substitution depth now has a stuck-scrutinee capture regression and a rejected
+wrong-endpoint twin. Three further cases pin the inactive-alternative zero
+fill for a refined product, transport of a refined value in the Execute phase,
+and a stuck value projection under a conditional.
+
+A fixed refinement-returning case compiles in exactly 332 steps and rejects
+fuel 331. Recursive checks of sum alternatives and case result annotations,
+with new budget ticks in runtime type and type normalization, add 35 steps to
+the earlier fixed sum fixture: it now accepts at 217 and rejects at 216. These
+are intentional shared-budget changes.
+
+The independent named-variable interpreter represents refinements as packages
+containing a value and proof, distinct from the erased scalar/product runtime
+representation. Directed and generated programs exercise nested refinements,
+booleans, products, sums, both branches, closure arguments and repeated calls,
+outer indices, erased captures, and transported families. The actual example
+runs across seven u32 boundaries and matches an exact modular-increment oracle.
+Its IR and Wasm bytes match a plain let-bound increment. A refined 50,000-local
+fixture matches its plain counterpart byte for byte; 50,001 locals are rejected.
+CLI rejections preserve existing artifacts and create no absent outputs.
+
+Six targeted mutations in an isolated source copy all built and were rejected
+by kernel regressions: removing case-handler or refinement-family binder depth,
+checking a runtime payload in Ghost,
+adding a phantom erasure binder, substituting
+the package instead of its value into projected evidence, and omitting case
+result formation. The scratch sources were restored. Independent core review
+found no correctness defect and supplied the stronger case-formation detector.
+
+No benchmark was refreshed or mechanized soundness claim added. Comparisons
+still do not construct branch evidence or establish overflow freedom.
+
 ## M1 internal sums, 2026-09-06
 
 Implemented on base commit `d1077d2` in an isolated workspace checkout:
@@ -19,7 +75,7 @@ git diff --check
 The 32 new kernel cases cover injection typing, both case handlers, scalar-only
 export restrictions, nested payload restrictions, erased uses, binder scope,
 closed and open conversion, substitution capture, transport, and ghost erasure.
-A fixed product-returning case with a sum-valued condition compiles in exactly
+A fixed product-returning case with a sum-valued scrutinee compiles in exactly
 182 shared steps and rejects fuel 181. This pins sum shape traversal, branch
 checking, erasure, merging, and emission together.
 
