@@ -1,0 +1,17 @@
+name = "agent-wasm"
+version = "0.1.0"
+defaultTargets = ["AgentWasm", "BindingTest", "PhaseTest"]
+
+[[lean_lib]]
+name = "AgentWasm"
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "BindingTest"
+srcDir = "proof-test"
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "PhaseTest"
+srcDir = "proof-test"
+moreLeanArgs = ["-DwarningAsError=true"]

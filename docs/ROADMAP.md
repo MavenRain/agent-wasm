@@ -20,9 +20,11 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: mechanize scope and typed substitution for the finite fragment, then
-conversion adequacy, branch realization, and erasure simulation. Named error
-variants and a reusable surface for these contracts remain open.
+Next: extend the mechanized binding fragment to dependent types and erased
+binders, prove dependent typed substitution, and connect it to the
+implementation. Then cover conversion adequacy, branch realization, and
+erasure simulation.
+Named error variants and a reusable surface for these contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
 including nested products and internal function fields. Static expansion retains
@@ -98,10 +100,24 @@ term and type binders. The validated-tool-budget example composes the immutable
 allowlist with overflow and ceiling checks, retaining distinct errors and
 checked evidence for the accepted action and its computed total.
 
-Substitution, preservation, and erasure simulation remain unproved for the
-general supported fragment. Establish them before calling it verified. Keep
-adversarial examples and an independent reference semantics alongside
-mechanization.
+Implemented twelfth slice: a reusable Lean library for scoped non-dependent
+finite syntax, identity binding laws, weakening, simultaneous typed
+substitution, and binder removal. It covers scalar, product, and sum types
+with lets and case handlers. The proofs do not cover dependent types or
+establish correspondence with the OCaml implementation. See
+`docs/MECHANIZATION.md` for the exact claims and remaining boundary.
+
+Implemented thirteenth slice: phase-sensitive contexts over the same finite
+syntax, with runtime and erased variable slots. Renaming, weakening,
+simultaneous typed substitution, and runtime binder removal preserve access
+in Execute or Ghost. Regressions reject erased-variable access beneath
+binders and in unselected branches. Erased binders, phase transitions inside
+terms, and dependent substitution remain open.
+
+Dependent substitution, preservation, and erasure simulation remain unproved
+for the general supported fragment. Establish them before calling it
+verified. Keep adversarial examples and an independent reference semantics
+alongside mechanization.
 
 ## M2: host boundary and ML surface
 

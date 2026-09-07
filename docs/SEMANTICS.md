@@ -3,6 +3,10 @@
 This document specifies the current finite core at base `e0a500e`. It gives
 rules to audit against `lib/ast.ml`, `lib/kernel.ml`, and `lib/erase.ml`.
 The rules and obligations below are not a mechanized soundness proof.
+The [Lean binding library](MECHANIZATION.md) proves typed substitution
+results over intrinsically scoped terms, including phase access for a
+non-dependent subset, with its boundary stated separately. The full
+dependent obligations below remain open.
 The [syntax specification](SPEC.md) defines the concrete forms and limits.
 
 ## Contexts, phases, and substitution

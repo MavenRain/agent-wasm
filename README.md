@@ -293,6 +293,14 @@ node scripts/run.mjs /tmp/tool-budget.wasm 7 60 41 100 0
 
 ## Validate
 
+Full validation also requires the Lean version pinned in `lean-toolchain`.
+`sh scripts/check-proofs.sh` checks the reusable `AgentWasm` proof library
+and its binding and phase regressions. The library holds scope by
+construction in `Term n` and proves typed substitution for a non-dependent
+finite subset, including runtime and ghost variable access. See the
+[mechanization boundary](docs/MECHANIZATION.md); the dependent compiler and
+its erasure are not formally verified.
+
 ```sh
 sh scripts/check.sh
 opam exec -- python3 -P scripts/bench.py

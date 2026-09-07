@@ -1,5 +1,70 @@
 # Compiler validation, 2026-09-07
 
+## M1 phase-sensitive finite binding, 2026-09-07
+
+Extended the staged finite binding slice with `AgentWasm.Phases` and the
+`PhaseTest` regression target. Both reuse the original scoped syntax and
+binding operations. The compiler implementation is unchanged. See
+[MECHANIZATION.md](MECHANIZATION.md) for the theorem premises and boundary.
+
+```text
+sh scripts/check.sh
+  OK lake: 0 errors, 0 sorries, 0 warnings
+  OK axioms: proof-test/BindingTest.lean reports 6 results, each [propext].
+  OK axioms: proof-test/PhaseTest.lean reports 6 results, each [propext].
+  OK sources: no tactic block, project axiom, partial, unsafe, or sorry.
+  OK build: 0 errors, 0 warnings
+  kernel: 356 cases, 0 failures
+  binding: 7168 cases, 0 failures
+  e2e: 1964 programs, 3928 host executions
+  erasure and rejection checks passed
+lake env lean proof-test/PhaseTest.lean
+  six theorem axiom reports, each containing only propext
+```
+
+Three isolated mutations were rejected after the combined library and
+regression source passed unchanged: allowing erased variables in Execute,
+making new local binders erased, and treating every variable occurrence as
+runtime regardless of its slot. A fourth mutation made the first eager pair
+component vacuous; `PhaseTest` rejects it with one type mismatch.
+`scripts/check-proofs.sh` now compares every axiom report and scans the
+library and regression sources. A tactic block, a project axiom, and a
+deleted `#print axioms` line each failed the script with exit 1. These
+checks cover the phase model, not correspondence with the OCaml checker or
+erasure correctness.
+
+## M1 mechanized finite binding, 2026-09-07
+
+Implemented on base `02ddd8f` in an isolated workspace checkout. The OCaml
+compiler is unchanged. The new root Lake package proves identity binding
+laws, weakening, simultaneous typed substitution, and binder removal for
+the non-dependent finite subset in [MECHANIZATION.md](MECHANIZATION.md).
+The full check script now includes the Lean library and regression target.
+
+```text
+sh scripts/check.sh
+  OK lake: 0 errors, 0 sorries, 0 warnings
+  OK axioms: proof-test/BindingTest.lean reports 6 results, each [propext].
+  OK axioms: proof-test/PhaseTest.lean reports 6 results, each [propext].
+  OK sources: no tactic block, project axiom, partial, unsafe, or sorry.
+  OK build: 0 errors, 0 warnings
+  kernel: 356 cases, 0 failures
+  binding: 7168 cases, 0 failures
+  e2e: 1964 programs, 3928 host executions
+  erasure and rejection checks passed
+lake env lean proof-test/BindingTest.lean
+  six theorem axiom reports, each containing only propext
+```
+
+An independent temporary Lake project required this checkout by local path,
+imported `AgentWasm`, and applied `subst_id`; its build passed without errors,
+warnings, or incomplete proofs. Three isolated source mutations were each
+rejected by Lean after the unchanged source passed: changing the lifted
+newest variable from 0 to 1, replacing every older variable with the removed
+binder's replacement, and swapping case handlers during substitution.
+The mutations failed in the identity or typed substitution proofs. These
+checks do not establish correspondence with the production OCaml traversal.
+
 ## M1 semantics and composed validation, 2026-09-07
 
 Implemented on base commit `e0a500e` in an isolated workspace checkout.
