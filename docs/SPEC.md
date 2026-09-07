@@ -1,5 +1,10 @@
 # Compiler specification
 
+The [finite core semantics](SEMANTICS.md) gives explicit typing, evaluation,
+and erasure rules, with the substitution and simulation obligations that
+remain to be proved. Executable regression checks do not discharge those
+obligations universally.
+
 ## Accepted direction
 
 The project targets WebAssembly. OCaml is the compiler implementation language.

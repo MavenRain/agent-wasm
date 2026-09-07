@@ -20,11 +20,9 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: specify evaluation and typing rules and establish the substitution and
-erasure obligations for the finite fragment. Extend the validation corpus to
-compose immutable tool policy with budget checks, preserving explicit errors
-and checked evidence. Named error variants and a reusable surface for these
-contracts remain open.
+Next: mechanize scope and typed substitution for the finite fragment, then
+conversion adequacy, branch realization, and erasure simulation. Named error
+variants and a reusable surface for these contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
 including nested products and internal function fields. Static expansion retains
@@ -93,10 +91,17 @@ pair retains the starting balance and accepted total; its error sum
 distinguishes overflow from exceeding the ceiling. The integer adapter exposes
 status or payload. Arithmetic remains modular, with explicit overflow rejection.
 
-Write small-step or evaluation semantics, typing rules, and an erasure relation.
-Establish substitution, preservation, and erasure simulation for the supported
-fragment before calling it verified. Use adversarial examples and an independent
-reference semantics alongside mechanization.
+Implemented eleventh slice: explicit evaluation and typing rules, an erasure
+relation, and qualified proof obligations in `docs/SEMANTICS.md`. Independent
+named-syntax binding tests exercise capture-avoiding substitution under nested
+term and type binders. The validated-tool-budget example composes the immutable
+allowlist with overflow and ceiling checks, retaining distinct errors and
+checked evidence for the accepted action and its computed total.
+
+Substitution, preservation, and erasure simulation remain unproved for the
+general supported fragment. Establish them before calling it verified. Keep
+adversarial examples and an independent reference semantics alongside
+mechanization.
 
 ## M2: host boundary and ML surface
 

@@ -470,6 +470,57 @@ for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
     }
   }
 }
+// The composed validator is checked against exact arithmetic, independently
+// of its wrapping addition and overflow predicate. Tool rejection wins first.
+const toolBudgetOracle = (tool, spent, proposed, ceiling, field) => {
+  const total = BigInt(spent) + BigInt(proposed);
+  const status = ![7, 9].includes(tool) ? 1
+    : total > 0xffffffffn ? 2 : total > BigInt(ceiling) ? 3 : 0;
+  return field === 0 ? status : status === 0 ? Number(total) : 0;
+};
+const toolBudgetRecord = ['record', ['tool', 'u32'], ['spent', 'u32'], ['proposed', 'u32']];
+const toolBudgetPlainPair = ['product', toolBudgetRecord, 'u32'];
+const toolBudgetPlainError = (code) => ['inl', toolBudgetPlainPair, code];
+let toolBudgetPlain = ['let', ['run', 'request', toolBudgetRecord],
+  ['record', ['tool', 'tool'], ['spent', 'spent'], ['proposed', 'proposed']],
+  ['let', ['run', 'total', 'u32'], ['add', ['field', 'request', 'spent'], ['field', 'request', 'proposed']],
+    ['case', 'u32', ['if', ['if', ['u32-eq', ['field', 'request', 'tool'], 7],
+      'true', ['u32-eq', ['field', 'request', 'tool'], 9]],
+      ['if', ['u32-lt', 'total', ['field', 'request', 'spent']], toolBudgetPlainError(2),
+        ['if', ['u32-le', 'total', 'ceiling'],
+          ['inr', 'u32', ['pair', 'request', 'total']], toolBudgetPlainError(3)]],
+      toolBudgetPlainError(1)],
+      ['error', ['if', ['u32-eq', 'field', 0], 'error', 0]],
+      ['accepted', ['if', ['u32-eq', 'field', 0], 0, ['snd', 'accepted']]]]]];
+for (const name of ['field', 'ceiling', 'proposed', 'spent', 'tool']) {
+  toolBudgetPlain = ['fn', ['run', name, 'u32'], toolBudgetPlain];
+}
+// No expected value here: the reference interpreter above supplies it, so the
+// twin is checked against evaluation rather than against a repeated constant.
+cases.push({ name: 'tool-budget-plain', body: toolBudgetPlain, args: [7, 0, 0, 0, 1] });
+// Each row is [spent, proposed, ceiling]. The first four cover every combination
+// of wrapping and a wrapped total above the ceiling, including their overlap.
+const toolBudgetInputs = [
+  [1, 1, 2], [1, 1, 1], [0xffffffff, 1, 0], [0xffffffff, 2, 0],
+  [0, 0, 0], [0, 1, 0], [0, 1, 1], [1, 0, 1], [1, 0, 0],
+  [0x7fffffff, 1, 0x80000000], [0x7fffffff, 1, 0x7fffffff],
+  [0x80000000, 0, 0x80000000], [0x80000000, 0, 0x7fffffff],
+  [0x80000000, 0x7fffffff, 0xffffffff], [0x80000000, 0x80000000, 0xffffffff],
+  [0xffffffff, 0, 0xffffffff], [0, 0xffffffff, 0xffffffff],
+  [0xfffffffe, 1, 0xffffffff], [0xfffffffe, 1, 0xfffffffe],
+  [0xffffffff, 0xffffffff, 0xffffffff], [0xffffffff, 0xffffffff, 0x7fffffff],
+];
+for (const tool of [0, 7, 8, 9, 0x80000007, 0xffffffff]) {
+  for (const [spent, proposed, ceiling] of toolBudgetInputs) {
+    for (const field of [0, 1, 0xffffffff]) {
+      const args = [tool, spent, proposed, ceiling, field];
+      cases.push({ name: `validated-tool-budget-${args.join('-')}`,
+        file: 'examples/validated-tool-budget.aw', args, expected: toolBudgetOracle(...args),
+        ...(tool === 7 && spent === 0 && proposed === 0 && ceiling === 0 && field === 1
+          ? { sameWasm: 'tool-budget-plain', sameIR: 'tool-budget-plain' } : {}) });
+    }
+  }
+}
 for (const x of [0, 1, 99, 100, 0x80000000, 0xffffffff]) {
   for (const projection of ['fst', 'snd']) {
     cases.push({ name: `product-if-${projection}-${x}`, args: [x], body:
@@ -785,6 +836,49 @@ try {
     'refinement evidence altered runtime IR');
 
   const output = join(scratch, 'rejected.wasm');
+  // Mutate the checked example itself. Each witness must justify its own
+  // predicate and polarity, and the dependent total must belong to its action.
+  const toolBudgetSource = readFileSync('examples/validated-tool-budget.aw', 'utf8');
+  const toolBudgetRejections = [
+    ['forged-tool', /\bpermitted(?=\))/g, '(refl 1)'],
+    ['forged-overflow', /\bsafe(?=\))/g, '(refl 0)'],
+    ['forged-ceiling', /\bwithin(?=\))/g, '(refl 1)'],
+    ['forged-addition', /\(refl \(add \(field request spent\) \(field request proposed\)\)\)/g,
+      '(refl 0)'],
+    ['tool-polarity',
+      /\(if \(u32-eq \(field request tool\) 7\)\s+true\s+\(u32-eq \(field request tool\) 9\)\)(?=\s+\(permitted)/g,
+      '(if (if (u32-eq (field request tool) 7) true (u32-eq (field request tool) 9)) false true)'],
+    ['overflow-polarity', /\(u32-lt \(value total\) \(field request spent\)\)/g,
+      '(if (u32-lt (value total) (field request spent)) false true)'],
+    ['ceiling-polarity', /\(u32-le \(value total\) ceiling\)/g,
+      '(if (u32-le (value total) ceiling) false true)'],
+    ['different-action', /\brequest(?=\s+\(pack)/g,
+      '(record (tool 8) (spent (field request spent)) (proposed (field request proposed)))'],
+    ['different-spent', /\brequest(?=\s+\(pack)/g,
+      '(record (tool (field request tool)) (spent (add (field request spent) 1)) '
+        + '(proposed (field request proposed)))'],
+    ['different-proposed', /\brequest(?=\s+\(pack)/g,
+      '(record (tool (field request tool)) (spent (field request spent)) '
+        + '(proposed (add (field request proposed) 1)))'],
+    ['different-total',
+      /\(add \(field request spent\) \(field request proposed\)\)(?=\s+\(refl)/g,
+      '(add (add (field request spent) (field request proposed)) 1)'],
+  ];
+  for (const [name, pattern, replacement] of toolBudgetRejections) {
+    assert.equal([...toolBudgetSource.matchAll(pattern)].length, 1,
+      `tool budget ${name}: mutation must target exactly one expression`);
+    const input = join(scratch, `reject-tool-budget-${name}.aw`);
+    const absent = join(scratch, `reject-tool-budget-${name}.wasm`);
+    writeFileSync(input, toolBudgetSource.replace(pattern, replacement));
+    writeFileSync(output, 'existing artifact');
+    for (const target of [output, absent]) {
+      rejects(() => run(compiler, ['compile', input, target]), mismatch, `tool budget ${name}`);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact',
+      `tool budget ${name}: replaced artifact`);
+    assert(!existsSync(absent), `tool budget ${name}: emitted artifact`);
+  }
+  rmSync(output);
   for (const name of ['reject-false-proof', 'reject-erased-use']) {
     assert.throws(() => run(compiler, ['compile', `examples/${name}.aw`, output]));
     assert(!existsSync(output), 'rejected source emitted output');

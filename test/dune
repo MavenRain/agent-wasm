@@ -1,3 +1,9 @@
 (test
  (name kernel_test)
+ (modules kernel_test)
+ (libraries agent_wasm))
+
+(test
+ (name binding_test)
+ (modules binding_test)
  (libraries agent_wasm))

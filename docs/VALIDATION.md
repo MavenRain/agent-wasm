@@ -1,4 +1,82 @@
-# Compiler validation, 2026-09-06
+# Compiler validation, 2026-09-07
+
+## M1 semantics and composed validation, 2026-09-07
+
+Implemented on base commit `e0a500e` in an isolated workspace checkout.
+The compiler implementation is unchanged. `docs/SEMANTICS.md` describes
+formation, phase-sensitive typing, conversion, eager source evaluation, and
+erasure for the finite core. It states the assumptions and remaining proof
+obligations for substitution, branch realization, and erasure simulation.
+These rules and executable checks do not constitute a mechanized proof.
+
+```text
+opam exec -- dunecho build
+  OK build: 0 errors, 0 warnings
+_build/default/test/kernel_test.exe
+  kernel: 356 cases, 0 failures
+_build/default/test/binding_test.exe
+  binding: 7168 cases, 0 failures
+node scripts/e2e.mjs
+  e2e: 1964 programs, 3928 host executions
+  erasure and rejection checks passed
+opam exec -- dune runtest
+  both suites passed
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 15 files
+```
+
+The new binding suite uses an independent named representation and lexical
+name resolution as its oracle. It compares the fixture tags with explicit tag
+lists of all 25 term and nine type constructors. A new constructor without a
+fixture then fails the suite. The suite adds 750 generated samples at depths
+one through five. Name resolution gives 607 distinct trees from those 750
+samples, and the suite prints that count, because a raw count hides a
+generator that repeats a tree. Directed fixtures mention both local and outer
+variables
+under nested term and type binders. Each fixture and generated sample checks
+shifts by zero, one, three, minus one, and minus three, plus four
+substitutions with closed and open replacements. The 33 term fixtures, 12
+type fixtures, and 750 generated samples give 795 samples and 7155 law cases.
+Two coverage cases and eleven boundary cases complete the 7168 total. The
+boundary cases check negative indices and shifts that would capture an outer
+variable. These are laws about scoped syntax, including untyped terms, rather
+than typed substitution theorems.
+
+All 32 individual mutations of the production binding traversal compiled in
+an isolated scratch copy and were detected by this suite. They cover branch
+depths and outside children for case and if-proof, the transport family and
+its outside children, Sigma/refinement/Pi domains and dependent bodies,
+nested depth resets, replacement lifting, outer index decrement, and shift
+cutoff. Generated samples catch nested branch-depth errors that the directed
+fixtures alone miss. The production source was unchanged by this experiment.
+A second sweep ran after the change to the generator. It applied an
+independent set of 33 mutations of the same traversal, one at a time. All 33
+compiled in an isolated copy, and the suite detected all 33.
+
+The validated-tool-budget example combines an immutable tool allowlist,
+overflow rejection, and a supplied ceiling. Its dependent success payload
+retains the action and a total with four erased proofs: the modular addition,
+no overflow, the ceiling bound, and tool membership. The host corpus covers
+six tool IDs, 21 arithmetic boundary triples, and three field selectors,
+including accepted zero, unsigned limits, and overlapping error conditions.
+An independent BigInt oracle specifies error precedence and exact addition.
+A proof-free counterpart must emit identical runtime IR and Wasm.
+
+Eleven rejecting mutations of the example check forged evidence, reversed
+branch predicates, independently altered tool/spent/proposed fields, and a
+computed total that does not match its equality witness. The focused rejection
+block passed for both existing and absent output paths: every mutation reports
+a type mismatch, preserves an existing output, and creates no new output.
+The new tests run through `scripts/check.sh`; the binding suite also runs
+through Dune's test alias.
+
+The composed example checks in 6213 steps and compiles to 395 bytes in 6532
+steps. Fuel 6531 is rejected without changing an existing output. Existing
+compilation boundaries remain 366/365 for refined-increment, 468/467 for
+budget-sum, 1411/1410 for record-policy, 501/500 for validated-ceiling, and
+1901/1900 for validated-budget. All six boundaries and output preservation
+were reproduced. The four README calls return 100, 1, 2, and 3 as documented.
+No performance snapshot was refreshed.
 
 ## M1 finite dependent pairs and validated budgets, 2026-09-06
 

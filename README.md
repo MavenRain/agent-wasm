@@ -266,6 +266,31 @@ node scripts/run.mjs /tmp/budget.wasm 60 41 100 0
 An accepted zero reports status 0, so callers can distinguish it from failure.
 The scalar export ABI and modular `add` operation are unchanged.
 
+`examples/validated-tool-budget.aw` composes the allowlist and budget checks.
+It accepts tool, spent, proposed, ceiling, and field selector. Status 0 means
+success; errors take precedence as 1 for a disallowed tool, 2 for overflow,
+and 3 for exceeding the ceiling. Any nonzero selector returns the accepted
+total, or zero on error.
+
+The internal success pairs the named action with a total carrying four erased
+proofs: equality to the action's modular addition, no overflow, compliance
+with the supplied ceiling, and membership of the action's tool in {7, 9}.
+The equality proof connects the arithmetic checks to the proposed action.
+This validates immutable inputs and grants no host authority.
+
+```sh
+_build/default/bin/main.exe compile examples/validated-tool-budget.aw \
+  /tmp/tool-budget.wasm
+node scripts/run.mjs /tmp/tool-budget.wasm 7 60 40 100 1
+# 100
+node scripts/run.mjs /tmp/tool-budget.wasm 8 4294967295 1 0 0
+# 1
+node scripts/run.mjs /tmp/tool-budget.wasm 9 4294967295 1 100 0
+# 2
+node scripts/run.mjs /tmp/tool-budget.wasm 7 60 41 100 0
+# 3
+```
+
 ## Validate
 
 ```sh
@@ -274,7 +299,9 @@ opam exec -- python3 -P scripts/bench.py
 ```
 
 Without `dunecho`, use `opam exec -- dune build`, then run
-`_build/default/test/kernel_test.exe` and `node scripts/e2e.mjs` directly.
+`_build/default/test/kernel_test.exe`, `_build/default/test/binding_test.exe`,
+and `node scripts/e2e.mjs` directly. The binding suite checks substitution
+against independent named syntax, including open replacements under binders.
 The e2e suite compares generated programs against an independent named-variable
 evaluator in both Node and Wasmtime. It checks binary equality after erasure,
 u32 boundaries, multi-byte encodings, variable capture, malformed inputs, and
@@ -286,5 +313,6 @@ samples, input hashes, compiler hash, and environment under `artifacts/bench/`.
 Wasm module emission and native object emission are different tasks. This small
 benchmark cannot establish application-scale or incremental compilation parity.
 
-See [the specification](docs/SPEC.md), [the roadmap](docs/ROADMAP.md), and
-[validation evidence](docs/VALIDATION.md).
+See [the specification](docs/SPEC.md),
+[finite core semantics](docs/SEMANTICS.md), [the roadmap](docs/ROADMAP.md),
+and [validation evidence](docs/VALIDATION.md).
