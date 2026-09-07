@@ -20,16 +20,19 @@ JavaScript currently only hosts the emitted Wasm.
 program ::= (export main term)
 rel     ::= run | erase
 type    ::= u32 | bool | (product type type) | (sum type type)
+          | (record (label type) ...)
           | (refine (name type) type)
           | (eq term term) | (pi (rel name type) type)
 term    ::= integer | true | false | name
           | (add term term)
           | (pair term term) | (fst term) | (snd term)
+          | (record (label term) ...) | (field term label)
           | (inl type term) | (inr type term)
           | (case type term (name term) (name term))
           | (pack type term term) | (value term) | (evidence term)
           | (u32-eq term term) | (u32-lt term term) | (u32-le term term)
           | (if term term term)
+          | (if-proof type term (name term) (name term))
           | (fn (rel name type) term)
           | (app rel term term)
           | (let (rel name type) term term)
@@ -44,7 +47,8 @@ Integer literals use one or more ASCII decimal digits and range from 0 through
 4294967295. Leading zeros are allowed. Signs, separators, and base prefixes are
 rejected. Tokens starting with a digit or sign are reserved for literals and
 cannot be used as binder names in functions, dependent function types, lets,
-transport families, refinement families, or case handlers.
+transport families, refinement families, or case and evidence handlers.
+Record labels follow the same lexical restriction, but do not bind names.
 The boolean literals `true` and `false` are also reserved binder names.
 Addition is modulo 2^32 in
 both conversion and Wasm execution. These are machine integers, not natural
@@ -55,13 +59,13 @@ numbers suitable for unchecked budget arithmetic.
 `bool` is distinct from `u32`. The three comparisons accept u32 operands and
 return bool, using unsigned equality, less-than, and less-than-or-equal. There
 are no implicit integer/boolean conversions. `if` requires a bool condition and
-two branches of the same type: u32, bool, or nested products, sums, and
-refinements of those types. Both branches are checked in the enclosing phase,
-including an unreachable branch. At runtime
-the condition is evaluated first and only the selected branch executes.
-Function and runtime evidence fields are not supported in conditional results.
-Refinement evidence is checked and erased. Internal functions and lets bind
-booleans; the export ABI remains exclusively `u32 -> ... -> u32`.
+two branches of the same type: u32, bool, or nested products, records, sums,
+and refinements of those types. Both branches are checked in the enclosing
+phase, including an unreachable branch. At runtime the condition is evaluated
+first and only the selected branch executes. Function and runtime evidence
+fields are not supported in conditional results. Refinement evidence is checked
+and erased. Internal functions and lets bind booleans; the export ABI remains
+exclusively `u32 -> ... -> u32`.
 
 Conversion reduces closed comparisons and selects a branch when the normalized
 condition is a boolean literal. For an open condition it normalizes both branches
@@ -96,8 +100,8 @@ dependent pairs, and non-wrapping amount operations remain future M1 work.
 
 `(refine (x A) P)` is a dependent pair with a runtime payload of type A and
 an erased equality proof of P. A has a finite shape built from u32, bool,
-products, sums, and refinements. Functions and bare equality evidence are
-excluded from its payload. P must be an `eq` type, well formed under the
+products, records, sums, and refinements. Functions and bare equality evidence
+are excluded from its payload. P must be an `eq` type, well formed under the
 erased binder `x : A`. A is outside that binder. This is a restricted form
 of dependent pair, not a general Sigma type or an implicit refinement solver.
 
@@ -122,10 +126,10 @@ the proof family under its payload binder and constructor arguments in their
 original scope. Transport can rewrite equality indices inside refinements,
 including under sums, without changing runtime shape.
 
-Refinements are admitted in runtime products, sums, conditionals, and case
-results. Each sum alternative and the explicit case result are checked for
-well-formed indexed evidence as well as supported runtime shape. A case
-result is outside both handler binders and is shifted under each of them.
+Refinements are admitted in runtime products, records, sums, conditionals, and
+case results. Each sum alternative and the explicit case result are checked for
+well-formed indexed evidence as well as supported runtime shape. A case result
+is outside both handler binders and is shifted under each of them.
 The export ABI remains exclusively `u32 -> ... -> u32`.
 
 Erasure keeps only a pack's payload. The value projection erases to its
@@ -138,29 +142,29 @@ substitution, normalization, and erasure work shares the compilation budget.
 `examples/refined-increment.aw` packages the modular increment with evidence
 that its payload equals `(add n 1)`, retrieves that evidence in a ghost binding,
 and returns the payload. Its IR and Wasm match the equivalent plain let-bound
-increment. Existing comparisons and branches do not introduce equality proofs,
-so this slice cannot yet prove that a runtime policy condition succeeded or
-that addition did not overflow. It enables carrying checked evidence in
-structured results; branch evidence and executable refinement remain M1 work.
+increment. Ordinary comparisons and conditionals do not introduce equality
+proofs. The explicit `if-proof` form described below supplies checked branch
+evidence for executable refinement. Named records support structured results;
+general dependent pairs remain M1 work.
 
 ## M1 internal sums
 
 `(sum A B)` is a non-dependent tagged choice. Both payload types must be built
-from u32, bool, products, sums, and refinements, in either phase. Functions and
-bare equality evidence are excluded, even in an inactive alternative.
-Refinement families are checked in both alternatives. `(inl B value)` infers
-`(sum A B)` from `value : A`; `(inr A value)` infers it from `value : B`.
-The explicit type describes the other alternative. Injection evaluates its
-payload eagerly and checks it in the enclosing phase.
+from u32, bool, products, records, sums, and refinements, in either phase.
+Functions and bare equality evidence are excluded, even in an inactive
+alternative. Refinement families are checked in both alternatives.
+`(inl B value)` infers `(sum A B)` from `value : A`; `(inr A value)` infers it
+from `value : B`. The explicit type describes the other alternative. Injection
+evaluates its payload eagerly and checks it in the enclosing phase.
 
 `(case R value (left a) (right b))` requires `value : (sum A B)` and checks
 both handlers against the explicit result type R, with `left : A` and
 `right : B` bound separately. R is outside the payload binders and must also
-be built from scalar, product, sum, and refinement types. Both handlers are
-checked in the enclosing phase, including unreachable handlers.
-This is non-dependent elimination: selecting an alternative does not
-introduce equality evidence.
-The export ABI still excludes sums and their payloads as structured values.
+be built from scalar, product, record, sum, and refinement types. Both handlers
+are checked in the enclosing phase, including unreachable handlers. This is
+non-dependent elimination: selecting an alternative does not introduce equality
+evidence. The export ABI still excludes sums and their payloads as structured
+values.
 
 Conversion normalizes the scrutinee. A known injection substitutes its payload
 into the corresponding handler and normalizes that body. An open scrutinee
@@ -348,6 +352,78 @@ toolchain/runtime, Wasm engine, and host runner. The kernel and erasure have
 regression and differential tests but no mechanized preservation proof yet.
 No claim of complete privacy enforcement, effect safety, or financial policy
 safety is made by this pure milestone.
+
+## M1 evidence-bearing conditionals
+
+`(if-proof RESULT CONDITION (yes THEN) (no ELSE))` checks CONDITION as bool
+in the enclosing phase. RESULT is a well-formed finite branch type, checked
+outside both binders, with the same payload restrictions as case results.
+THEN and ELSE are both checked against RESULT lifted under one erased binder.
+The yes binder has type `(eq (if CONDITION 1 0) 1)`; the no binder has type
+`(eq (if CONDITION 1 0) 0)`. Each binder is scoped only over its own branch.
+Existing names can be shadowed, subject to the usual literal-name restriction.
+
+Evidence may construct a refined payload or feed erased arguments and transport.
+It cannot be read at runtime or appear in the result type through a free branch
+binder. A runtime condition cannot read erased data. Ghost uses may inspect
+ghost conditions, but their computations are erased. Ordinary `if` retains its
+existing behavior and introduces no evidence.
+
+Conversion normalizes the condition. A literal bool selects its branch and
+substitutes `(refl 1)` or `(refl 0)` for the evidence binder, then normalizes
+the result. An open condition leaves an `if-proof` with normalized result type
+and branches. There is no general branch-assumption rewriting or commuting
+conversion through projections. Traversal counts both branch binders for
+capture-avoiding substitution and shares the existing checking budget.
+
+The evidence describes the normal form of the condition. An if-proof nested in
+the opposite branch of an earlier one, over the same condition or a convertible
+condition, holds both evidence polarities in one context. Such a context proves
+`(eq 0 1)`, so the inner branch can build any refined value. That branch is
+dead at runtime, because the erased `if` tests the same condition. A program
+that reaches the contradiction never executes it. Conversion must therefore
+stay a subrelation of the erased evaluator. This is a soundness assumption for
+evidence-bearing conditionals, not only a completeness property. The kernel
+suite pins both nests and their erased IR.
+
+Erasure drops each evidence binder and lowers to the existing runtime `If`.
+The condition executes once and only the selected branch executes. Proofs add
+no runtime slots, tags, or locals. The integer export ABI is unchanged.
+`examples/validated-ceiling.aw` demonstrates an error/refined-value sum whose
+successful payload proves its unsigned comparison succeeded. This does not
+establish non-wrapping arithmetic or policy validity beyond that comparison.
+
+## M1 named records
+
+`(record (tool u32) (price u32))` is a structural record type.
+`(record (tool 7) (price 75))` constructs a record, and `(field action price)`
+selects a field. Type and value syntax are distinguished by position. Records
+must be nonempty and labels must be unique; duplicate, empty, and missing-field
+errors are explicit. Labels and their declaration order participate in type
+identity. Reordering fields requires explicit reconstruction. There is no
+width subtyping, implicit coercion, record update, or empty-record unit type.
+
+Record fields support u32, bool, and finite products, sums, refinements, and
+records. Raw equality evidence and functions cannot be record fields. A
+refinement's evidence is still permitted and erased. Field declarations bind
+no variables: field types may reference outer indices but cannot depend on
+other fields. General dependent pairs remain separate future work. All field
+values are checked in the enclosing phase and evaluated eagerly in declaration
+order, including fields that are not subsequently selected.
+
+Conversion normalizes every field and projects a known record by label. A
+projection of an open record stays symbolic; different labels remain distinct.
+Records can be branch results, sum payloads, refinement payloads, and internal
+function arguments. Formation checks recurse through every field. Mapping,
+formation, normalization, lookup, and backend field traversal share the budget.
+
+The runtime IR retains labels for static selection, but Wasm contains only
+the scalar computations. Branch effects execute once before selecting fields;
+all emitted locals count toward the existing portability limit. Record exports
+and entry parameters remain unsupported by the integer ABI. The record-policy
+example validates tool IDs 7 or 9 and a price no greater than 100, packages the
+accepted record with erased evidence, then returns price plus 1 or rejection 0.
+The ceiling ensures this particular adapter addition cannot overflow.
 
 ## Future boundary rule
 

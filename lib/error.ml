@@ -1,6 +1,9 @@
 type t =
   | Parse of string
   | Unknown_name of string
+  | Empty_record
+  | Duplicate_field of string
+  | Unknown_field of string
   | Invalid_index of int
   | Invalid_u32 of int64
   | Type_mismatch
@@ -15,6 +18,9 @@ type t =
 let message = function
   | Parse s -> "parse: " ^ s
   | Unknown_name s -> "unknown name: " ^ s
+  | Empty_record -> "record must contain at least one field"
+  | Duplicate_field s -> "duplicate record field: " ^ s
+  | Unknown_field s -> "unknown record field: " ^ s
   | Invalid_index n -> "invalid variable index: " ^ string_of_int n
   | Invalid_u32 n -> "outside u32 range: " ^ Int64.to_string n
   | Type_mismatch -> "type mismatch (including equality endpoints or relevance)"

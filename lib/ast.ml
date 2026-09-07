@@ -6,6 +6,7 @@ type ty =
   | U32
   | Bool
   | Product of ty * ty
+  | Record of (string * ty) list
   | Sum of ty * ty
   (* Only the evidence family binds the erased payload. *)
   | Refine of ty * ty
@@ -17,8 +18,12 @@ and term =
   | Boolean of bool
   | Compare of comparison * term * term
   | If of term * term * term
+  (* Result and condition are outside the two erased evidence binders. *)
+  | IfProof of ty * term * term * term
   | Add of term * term
   | Pair of term * term
+  | RecordValue of (string * term) list
+  | Field of term * string
   | Fst of term
   | Snd of term
   (* The annotation is a complete refinement type; neither term binds. *)
@@ -46,6 +51,16 @@ let compare op a b = match op with
 
 open Error
 
+let map_fields budget f fields =
+  let rec walk acc = function
+    | [] -> Ok (List.rev acc)
+    | (name, value) :: rest ->
+        let* () = Budget.tick budget in
+        let* value = f value in
+        walk ((name, value) :: acc) rest
+  in
+  walk [] fields
+
 (* Binder depth includes indices inside types. Substitution shares the budget. *)
 let rec map_term budget variable depth term =
   let* () = Budget.tick budget in
@@ -71,6 +86,12 @@ let rec map_term budget variable depth term =
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
       Ok (Pair (a, b))
+  | RecordValue fields ->
+      let* fields = map_fields budget (map_term budget variable depth) fields in
+      Ok (RecordValue fields)
+  | Field (value, name) ->
+      let* value = map_term budget variable depth value in
+      Ok (Field (value, name))
   | Fst a -> Result.map (fun a -> Fst a) (map_term budget variable depth a)
   | Snd a -> Result.map (fun a -> Snd a) (map_term budget variable depth a)
   | Pack (ty, value, proof) ->
@@ -84,6 +105,12 @@ let rec map_term budget variable depth term =
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
       Ok (Compare (op, a, b))
+  | IfProof (ty, c, a, b) ->
+      let* ty = map_ty budget variable depth ty in
+      let* c = map_term budget variable depth c in
+      let* a = map_term budget variable (depth + 1) a in
+      let* b = map_term budget variable (depth + 1) b in
+      Ok (IfProof (ty, c, a, b))
   | If (c, a, b) ->
       let* c = map_term budget variable depth c in
       let* a = map_term budget variable depth a in
@@ -131,6 +158,9 @@ and map_ty budget variable depth ty =
       let* a = map_ty budget variable depth a in
       let* b = map_ty budget variable depth b in
       Ok (Product (a, b))
+  | Record fields ->
+      let* fields = map_fields budget (map_ty budget variable depth) fields in
+      Ok (Record fields)
   | Refine (a, proof) ->
       let* a = map_ty budget variable depth a in
       let* proof = map_ty budget variable (depth + 1) proof in

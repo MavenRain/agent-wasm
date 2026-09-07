@@ -8,6 +8,18 @@ const compiler = resolve('_build/default/bin/main.exe');
 const scratch = mkdtempSync(join(tmpdir(), 'agent-wasm-e2e-'));
 const run = (file, args) => execFileSync(file, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
 const source = (tree) => Array.isArray(tree) ? `(${tree.map(source).join(' ')})` : String(tree);
+// A rejection must name its reason, so a different guard cannot mask it.
+const rejects = (thunk, reason, label) => assert.throws(thunk, (error) => {
+  assert.equal(String(error.stderr).trim(), reason, `${label}: wrong reason`);
+  return true;
+});
+const mismatch = 'type mismatch (including equality endpoints or relevance)';
+const erasedUse = 'erased variable used at runtime: index 0';
+const emptyRecord = 'record must contain at least one field';
+const reservedBinder = 'parse: binder name is reserved for literals';
+const reservedLabel = 'parse: record label is reserved for literals';
+const badExport =
+  'export must have type u32 -> ... -> u32 with runtime parameters';
 
 // This evaluator uses names and lexical closures. It does not share the
 // compiler's de Bruijn substitution, erasure, or Wasm encoding implementation.
@@ -20,6 +32,21 @@ function interpret(tree, env = new Map()) {
     return env.get(tree);
   }
   switch (tree[0]) {
+    case 'record': {
+      const fields = new Map();
+      for (const [label, value] of tree.slice(1)) {
+        assert(!fields.has(label), `reference: duplicate field ${label}`);
+        fields.set(label, interpret(value, env));
+      }
+      assert(fields.size > 0, 'reference: empty record');
+      return { kind: 'record', fields };
+    }
+    case 'field': {
+      const record = interpret(tree[1], env);
+      assert.equal(record?.kind, 'record', 'reference: field requires a record');
+      assert(record.fields.has(tree[2]), `reference: unknown field ${tree[2]}`);
+      return record.fields.get(tree[2]);
+    }
     case 'inl': return { side: 'left', value: interpret(tree[2], env) };
     case 'inr': return { side: 'right', value: interpret(tree[2], env) };
     case 'case': {
@@ -46,6 +73,12 @@ function interpret(tree, env = new Map()) {
     case 'u32-lt': return interpret(tree[1], env) < interpret(tree[2], env);
     case 'u32-le': return interpret(tree[1], env) <= interpret(tree[2], env);
     case 'if': return interpret(tree[interpret(tree[1], env) ? 2 : 3], env);
+    case 'if-proof': {
+      const condition = interpret(tree[2], env);
+      assert.equal(typeof condition, 'boolean', 'reference: invalid proof condition');
+      const [name, body] = tree[condition ? 3 : 4];
+      return interpret(body, new Map([...env, [name, { witness: condition ? 1 : 0 }]]));
+    }
     case 'add': return (interpret(tree[1], env) + interpret(tree[2], env)) >>> 0;
     case 'fn': return (value) => interpret(tree[2], new Map([...env, [tree[1][1], value]]));
     case 'app': return interpret(tree[2], env)(interpret(tree[3], env));
@@ -65,7 +98,7 @@ const packU32 = (value) => ['pack', refinedU32, value, ['refl', value]];
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(12)) {
+  switch (random(15)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -100,11 +133,113 @@ function generate(depth, names) {
       ['inl', refinedU32, packU32(generate(depth - 1, names))],
       ['inr', refinedU32, packU32(generate(depth - 1, names))]],
       [name, ['value', name]], [name, ['add', ['value', name], generate(depth - 1, names)]]];
+    case 12: return ['field', ['record',
+      ['first', generate(depth - 1, names)], ['second', generate(depth - 1, names)],
+      ['third', generate(depth - 1, names)]], ['first', 'second', 'third'][random(3)]];
+    case 13: return ['field', ['if', ['u32-le', generate(depth - 1, names), 0x80000000],
+      ['record', ['amount', generate(depth - 1, names)], ['allowed', 'true']],
+      ['record', ['amount', generate(depth - 1, names)], ['allowed', 'false']]], 'amount'];
+    case 14: return ['case', 'u32', ['if', ['u32-lt', generate(depth - 1, names), 0x80000000],
+      ['inl', 'u32', ['record', ['amount', generate(depth - 1, names)]]],
+      ['inr', ['record', ['amount', 'u32']], generate(depth - 1, names)]],
+      [name, ['field', name, 'amount']], [name, name]];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const tool of [0, 7, 8, 9, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  for (const price of [0, 1, 99, 100, 101, 0x80000000, 0xffffffff]) {
+    cases.push({ name: `record-policy-${tool}-${price}`, file: 'examples/record-policy.aw',
+      args: [tool, price], expected: (tool === 7 || tool === 9) && price <= 100 ? price + 1 : 0 });
+  }
+}
+for (const x of [0, 1, 99, 100, 101, 0x80000000, 0xffffffff]) {
+  const recordTy = ['record', ['amount', 'u32'], ['nested', ['record', ['flag', 'bool'], ['extra', 'u32']]]];
+  const first = ['record', ['amount', ['add', 'x', 1]],
+    ['nested', ['record', ['flag', ['u32-eq', 'x', 0]], ['extra', ['add', 'x', 2]]]]];
+  const second = ['record', ['amount', ['add', 'x', 3]],
+    ['nested', ['record', ['flag', ['u32-eq', 'x', 100]], ['extra', ['add', 'x', 4]]]]];
+  const consume = (name) => ['if', ['field', ['field', name, 'nested'], 'flag'],
+    ['field', name, 'amount'], ['field', ['field', name, 'nested'], 'extra']];
+  for (const label of ['first', 'second', 'third']) {
+    cases.push({ name: `record-projection-state-${label}-${x}`, args: [x], body:
+      ['fn', ['run', 'x', 'u32'], ['add', ['field', ['record',
+        ['first', ['add', 'x', 1]], ['second', ['add', 'x', 2]], ['third', ['add', 'x', 3]]], label],
+        ['add', 'x', 9]]] });
+  }
+  cases.push({ name: `record-nested-if-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', recordTy],
+      ['if', ['u32-lt', 'x', 100], first, second], consume('action')]] });
+  const mixedRecordTy = ['record', ['pair', ['product', 'bool', 'u32']],
+    ['choice', ['sum', 'u32', ['record', ['amount', 'u32']]]]];
+  cases.push({ name: `record-product-sum-fields-if-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', mixedRecordTy],
+      ['if', ['u32-lt', 'x', 100],
+        ['record', ['pair', ['pair', 'true', ['add', 'x', 1]]],
+          ['choice', ['inl', ['record', ['amount', 'u32']], ['add', 'x', 2]]]],
+        ['record', ['pair', ['pair', 'false', ['add', 'x', 3]]],
+          ['choice', ['inr', 'u32', ['record', ['amount', ['add', 'x', 4]]]]]]],
+      ['add', ['if', ['fst', ['field', 'action', 'pair']], ['snd', ['field', 'action', 'pair']], 'x'],
+        ['case', 'u32', ['field', 'action', 'choice'], ['amount', 'amount'],
+          ['payload', ['field', 'payload', 'amount']]]]]] });
+  cases.push({ name: `record-case-result-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', recordTy],
+      ['case', recordTy, ['if', ['u32-lt', 'x', 100], ['inl', 'u32', 7], ['inr', 'u32', 9]],
+        ['left', first], ['right', second]], consume('action')]] });
+  cases.push({ name: `record-sum-alternatives-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['case', 'u32',
+      ['if', ['u32-lt', 'x', 100], ['inl', ['record', ['amount', 'u32']], first],
+        ['inr', recordTy, ['record', ['amount', ['add', 'x', 5]]]]],
+      ['action', consume('action')], ['action', ['field', 'action', 'amount']]]] });
+  cases.push({ name: `record-branch-evidence-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', recordTy],
+      ['if-proof', recordTy, ['u32-le', 'x', 100], ['yes', first], ['no', second]], consume('action')]] });
+  cases.push({ name: `record-closure-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', recordTy], first,
+      ['let', ['run', 'f', ['pi', ['run', 'other', recordTy], 'u32']],
+        ['fn', ['run', 'other', recordTy], ['add', consume('action'), consume('other')]],
+        ['add', ['app', 'run', 'f', second], ['app', 'run', 'f', first]]]]] });
+  const indexed = ['refine', ['item', 'u32'], ['eq', 'item', 'x']];
+  const indexedRecord = ['record', ['x', 'u32'], ['amount', indexed]];
+  const indexedValue = ['record', ['x', 7], ['amount', ['pack', indexed, 'x', ['refl', 'x']]]];
+  cases.push({ name: `record-indexed-field-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', indexedRecord], indexedValue,
+      ['let', ['erase', 'proof', ['eq', ['value', ['field', 'action', 'amount']], 'x']],
+        ['evidence', ['field', 'action', 'amount']], ['add', ['value', ['field', 'action', 'amount']],
+          ['field', 'action', 'x']]]]] });
+  const refinedRecord = ['refine', ['action', recordTy],
+    ['eq', ['field', 'action', 'amount'], ['add', 'x', 1]]];
+  cases.push({ name: `record-refined-payload-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'package', refinedRecord],
+      ['pack', refinedRecord, first, ['refl', ['add', 'x', 1]]],
+      ['let', ['run', 'action', recordTy], ['value', 'package'], consume('action')]]] });
+}
+for (const amount of [0, 1, 99, 100, 101, 0x7fffffff, 0x80000000, 0xffffffff]) {
+  for (const ceiling of [0, 100, 0x80000000, 0xffffffff]) {
+    cases.push({ name: `validated-ceiling-${amount}-${ceiling}`,
+      file: 'examples/validated-ceiling.aw', args: [amount, ceiling],
+      expected: amount <= ceiling ? amount : 0 });
+  }
+  for (const op of ['u32-eq', 'u32-lt', 'u32-le']) {
+    const condition = [op, 'amount', 100];
+    const indicator = ['if', condition, 1, 0];
+    const result = ['sum', ['refine', ['x', 'u32'], ['eq', indicator, 1]],
+      ['refine', ['x', 'u32'], ['eq', indicator, 0]]];
+    cases.push({ name: `branch-evidence-${op}-${amount}`, args: [amount], body:
+      ['fn', ['run', 'amount', 'u32'], ['case', 'u32',
+        ['if-proof', result, condition,
+          ['yes', ['inl', result[2], ['pack', result[1], ['add', 'amount', 1], 'yes']]],
+          ['no', ['inr', result[1], ['pack', result[2], ['add', 'amount', 2], 'no']]]],
+        ['success', ['value', 'success']], ['failure', ['value', 'failure']]]] });
+  }
+  cases.push({ name: `branch-evidence-nested-closure-${amount}`, args: [amount], body:
+    ['fn', ['run', 'amount', 'u32'], ['app', 'run',
+      ['fn', ['run', 'x', 'u32'], ['if-proof', 'u32', ['u32-le', 'x', 100],
+        ['yes', ['if-proof', 'u32', ['u32-eq', 'x', 0],
+          ['zero', ['add', 'amount', 7]], ['positive', ['add', 'x', 8]]]],
+        ['no', ['add', 'amount', 9]]]], ['add', 'amount', 1]]] });
+}
 for (const x of [0, 1, 99, 100, 0x7fffffff, 0x80000000, 0xffffffff]) {
   const next = ['add', 'x', 1];
   const indexed = ['refine', ['item', 'u32'], ['eq', 'item', next]];
@@ -350,6 +485,14 @@ for (let i = 0; i < 30; i++) {
       ['let', ['erase', 'proof', ['eq', ['value', 'package'], value]], ['evidence', 'package'],
         ['add', ['value', 'package'], 'input']]]], args: [random(0x100000000)] });
 }
+for (let i = 0; i < 30; i++) {
+  const condition = ['u32-le', generate(3, ['input']), generate(3, ['input'])];
+  const family = ['refine', ['item', 'u32'], ['eq', ['if', condition, 1, 0], 1]];
+  cases.push({ name: `generated-branch-evidence-${i}`, args: [random(0x100000000)],
+    body: ['fn', ['run', 'input', 'u32'], ['if-proof', 'u32', condition,
+      ['yes', ['value', ['pack', family, generate(3, ['input']), 'yes']]],
+      ['no', generate(3, ['input'])]]] });
+}
 let wide = 'x';
 for (let i = 0; i < 80; i++) wide = ['add', wide, i];
 cases.push({ name: 'large-sections', body: ['fn', ['run', 'x', 'u32'], wide], args: [13] });
@@ -384,6 +527,13 @@ function additions(count, leaf) {
 cases.push({ name: 'local-limit', body: additions(50000, 1), args: [], fuel: '100000000' });
 cases.push({ name: 'refined-local-limit', body: ['value', packU32(additions(50000, 1))],
   args: [], fuel: '100000000', sameWasm: 'local-limit' });
+cases.push({ name: 'record-local-limit-all-fields', body: ['field', ['record',
+  ['before', additions(25000, 1)], ['selected', 42], ['after', additions(25000, 2)]], 'selected'],
+  args: [], fuel: '100000000' });
+cases.push({ name: 'record-branch-local-limit', body: ['field', ['if', 'false',
+  ['record', ['first', additions(24998, 1)], ['second', 7]],
+  ['record', ['first', 11], ['second', additions(24999, 2)]]], 'second'],
+  args: [], fuel: '100000000' });
 cases.push({ name: 'sum-case-local-limit', body: ['case', 'u32', ['inr', 'u32', 7],
   ['x', additions(24999, 'x')], ['y', additions(25000, 'y')]], args: [], fuel: '100000000' });
 cases.push({ name: 'sum-if-local-limit', body: ['case', 'u32', ['if', 'false',
@@ -396,6 +546,34 @@ cases.push({ name: 'branch-local-limit', body: ['if', ['u32-lt', 1, 2],
 cases.push({ name: 'product-branch-local-limit', body: ['snd', ['if', 'false',
   ['pair', additions(24998, 1), 7], ['pair', 11, additions(24999, 2)]]],
   args: [], fuel: '100000000' });
+
+// Nesting an if-proof in the opposite branch over the same condition puts
+// both evidence polarities in scope, so the inner arm may forge a refined
+// value. The erased conditional tests the same condition, so that arm never
+// runs. These two programs pin the dead arm on a real host.
+const ceiling = ['refine', ['n', 'u32'],
+  ['eq', ['if', ['u32-le', 'n', 100], 1, 0], 1]];
+const forged = ['transport', ['m', ['eq', 'm', 1]],
+  ['if', ['u32-le', 'x', 100], 1, 0], 0, 'no', 'yes'];
+const contradictionNest = ['fn', ['run', 'x', 'u32'],
+  ['value', ['if-proof', ceiling, ['u32-le', 'x', 100],
+    ['yes', ['pack', ceiling, 'x', 'yes']],
+    ['no', ['if-proof', ceiling, ['u32-le', 'x', 100],
+      ['yes', ['pack', ceiling, 200, forged]],
+      ['no', ['pack', ceiling, 0, ['refl', 1]]]]]]]];
+const convertibleNest = ['fn', ['run', 'x', 'u32'],
+  ['if-proof', 'u32', ['u32-le', 'x', 100], ['yes', 1],
+    ['no', ['if-proof', 'u32',
+      ['field', ['record', ['c', ['u32-le', 'x', 100]]], 'c'],
+      ['yes', ['transport', ['m', 'u32'], 0, 1, forged, 7]], ['no', 0]]]]];
+for (const [x, expected] of [[7, 7], [100, 100], [101, 0], [200, 0]]) {
+  cases.push({ name: `evidence-contradiction-${x}`, body: contradictionNest,
+    args: [x], expected });
+}
+for (const [x, expected] of [[7, 1], [100, 1], [101, 0], [200, 0]]) {
+  cases.push({ name: `evidence-convertible-nest-${x}`, body: convertibleNest,
+    args: [x], expected });
+}
 
 try {
   let hostCalls = 0;
@@ -481,6 +659,90 @@ try {
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
     assert(!existsSync(absent));
   }
+  const branchRejections = [
+    [['if-proof', 'u32', 1, ['yes', 1], ['no', 0]], mismatch],
+    [['if-proof', 'u32', 'true', ['yes', 'yes'], ['no', 0]], erasedUse],
+    [['if-proof', 'u32', 'true', ['yes', 1], ['no', 'no']], erasedUse],
+    [['if-proof', 'u32', 'true', ['yes', 1], ['no', 'false']], mismatch],
+    [['if-proof', 'u32', 'true', ['true', 1], ['no', 0]], reservedBinder],
+    [['if-proof', 'u32', 'true', ['yes', 1], ['false', 0]], reservedBinder],
+    [['if-proof', 'u32', 'true', ['yes', 1], 0], 'parse: invalid term form'],
+    [['if-proof', 'u32', 'yes', ['yes', 1], ['no', 0]], 'unknown name: yes'],
+    [['let', ['erase', 'condition', 'bool'], 'true',
+      ['if-proof', 'u32', 'condition', ['yes', 1], ['no', 0]]], erasedUse],
+    [['fn', ['run', 'x', 'u32'], ['if-proof', 'u32', ['u32-le', 'x', 100],
+      ['yes', 1], ['no', ['let', ['erase', 'bad',
+        ['eq', ['if', ['u32-le', 'x', 100], 1, 0], 1]], 'no', 0]]]], mismatch],
+  ];
+  for (const [index, [body, reason]] of branchRejections.entries()) {
+    const input = join(scratch, `reject-branch-${index}.aw`);
+    const absent = join(scratch, `reject-branch-${index}.wasm`);
+    writeFileSync(input, source(['export', 'main', body]));
+    writeFileSync(output, 'existing artifact');
+    for (const target of [output, absent]) {
+      rejects(() => run(compiler, ['compile', input, target]), reason,
+        `branch rejection ${index}`);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+    assert(!existsSync(absent));
+  }
+  // The two empty-record entries stay inside a u32-typed export, so the
+  // export guard cannot stand in for the empty-record guard.
+  const recordRejections = [
+    [['fn', ['run', 'x', 'u32'],
+      ['add', 'x', ['field', ['record'], 'tool']]], emptyRecord],
+    [['fn', ['run', 'x', 'u32'], ['let', ['run', 'action', ['record']],
+      ['record', ['tool', 7]], 'x']], emptyRecord],
+    [['field', ['record', ['tool', 7], ['tool', 9]], 'tool'],
+      'duplicate record field: tool'],
+    [['fn', ['run', 'action', ['record', ['tool', 'u32'], ['tool', 'bool']]], 0],
+      'duplicate record field: tool'],
+    [['field', ['record', ['tool', 7]], 'price'], 'unknown record field: price'],
+    [['field', 7, 'price'], mismatch],
+    [['field', ['record', ['tool', 7, 9]], 'tool'],
+      'parse: invalid record field'],
+    [['fn', ['run', 'action', ['record', 'tool']], 0],
+      'parse: invalid record field'],
+    [['record', ['tool', 7]], badExport],
+    [['fn', ['run', 'action', ['record', ['tool', 'u32']]],
+      ['field', 'action', 'tool']], badExport],
+    [['let', ['run', 'action', ['record', ['tool', 'u32'], ['price', 'u32']]],
+      ['record', ['price', 42], ['tool', 7]], 0], mismatch],
+    [['field', ['if', 'true', ['record', ['tool', 7]],
+      ['record', ['price', 9]]], 'tool'], mismatch],
+    [['field', ['record', ['tool', 7], ['price', ['add', 'true', 1]]], 'tool'],
+      mismatch],
+    [['let', ['erase', 'price', 'u32'], 42,
+      ['field', ['record', ['tool', 7], ['price', 'price']], 'tool']],
+      erasedUse],
+    [['let', ['erase', 'action', ['record', ['tool', 'u32']]],
+      ['record', ['tool', 7]], ['field', 'action', 'tool']], erasedUse],
+    [['field', ['record', ['tool', 7], ['proof', ['refl', 7]]], 'tool'],
+      'equality evidence may only occur in erased positions'],
+    [['field', ['record', ['tool', 7],
+      ['callback', ['fn', ['run', 'n', 'u32'], 'n']]], 'tool'], mismatch],
+    [['fn', ['run', 'action',
+      ['record', ['callback', ['pi', ['run', 'n', 'u32'], 'u32']]]], 0],
+      mismatch],
+    [['field', ['record', ['tool', 7], ['price', 'tool']], 'price'],
+      'unknown name: tool'],
+    [['fn', ['run', 'action', ['record', ['tool', 'u32'],
+      ['price', ['refine', ['item', 'u32'], ['eq', 'item', 'tool']]]]], 0],
+      'unknown name: tool'],
+    [['field', ['record', ['true', 7]], 'tool'], reservedLabel],
+  ];
+  for (const [index, [body, reason]] of recordRejections.entries()) {
+    const input = join(scratch, `reject-record-${index}.aw`);
+    const absent = join(scratch, `reject-record-${index}.wasm`);
+    writeFileSync(input, source(['export', 'main', body]));
+    writeFileSync(output, 'existing artifact');
+    for (const target of [output, absent]) {
+      rejects(() => run(compiler, ['compile', input, target]), reason,
+        `record rejection ${index}`);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+    assert(!existsSync(absent));
+  }
   const invalidFamily = ['refine', ['item', 'u32'], ['eq', 'true', 'true']];
   const refinementRejections = [
     { name: 'false-proof', body: ['value', ['pack', ['refine', ['item', 'u32'], ['eq', 'item', 0]], 1, ['refl', 1]]] },
@@ -543,23 +805,32 @@ try {
     assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
   }
   for (const name of ['true', 'false', '5', '0x2A', '42x', '+', '-x']) {
-    for (const body of [
-      ['fn', ['run', name, 'u32'], 42],
-      ['let', ['erase', name, 'u32'], 1, 42],
-      ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
-      ['value', ['pack', ['refine', [name, 'u32'], ['eq', 7, 7]], 7, ['refl', 7]]],
-      ['case', 'u32', ['inl', 'u32', 7], [name, 0], ['y', 'y']],
-      ['case', 'u32', ['inl', 'u32', 7], ['x', 'x'], [name, 0]],
-      ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
-    ]) {
-      writeFileSync(malformed, `(export main ${source(body)})`);
-      const absent = join(scratch, 'bad-binder.wasm');
-      for (const target of [output, absent]) {
-        assert.throws(() => run(compiler, ['compile', malformed, target]),
-          /parse: binder name is reserved for literals/);
+    const reserved = [
+      [/parse: binder name is reserved for literals/, [
+        ['fn', ['run', name, 'u32'], 42],
+        ['let', ['erase', name, 'u32'], 1, 42],
+        ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
+        ['value', ['pack', ['refine', [name, 'u32'], ['eq', 7, 7]], 7, ['refl', 7]]],
+        ['case', 'u32', ['inl', 'u32', 7], [name, 0], ['y', 'y']],
+        ['case', 'u32', ['inl', 'u32', 7], ['x', 'x'], [name, 0]],
+        ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
+      ]],
+      [/parse: record label is reserved for literals/, [
+        ['field', ['record', [name, 7]], 'amount'],
+        ['fn', ['run', 'action', ['record', [name, 'u32']]], 0],
+        ['field', ['record', ['amount', 7]], name],
+      ]],
+    ];
+    for (const [reason, bodies] of reserved) {
+      for (const body of bodies) {
+        writeFileSync(malformed, `(export main ${source(body)})`);
+        const absent = join(scratch, 'bad-binder.wasm');
+        for (const target of [output, absent]) {
+          assert.throws(() => run(compiler, ['compile', malformed, target]), reason);
+        }
+        assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
+        assert(!existsSync(absent));
       }
-      assert.equal(readFileSync(output, 'utf8'), 'existing artifact');
-      assert(!existsSync(absent));
     }
   }
   for (const body of [additions(50001, 1), ['value', packU32(additions(50001, 1))],
@@ -572,6 +843,12 @@ try {
       ['pair', 11, additions(24999, 2)]]],
     ['fst', ['pair', 42, additions(50001, 1)]],
     ['snd', ['pair', additions(25000, 1), additions(25001, 2)]],
+    ['field', ['record', ['selected', 42], ['after', additions(50001, 1)]], 'selected'],
+    ['field', ['record', ['before', additions(25000, 1)], ['selected', 42],
+      ['after', additions(25001, 2)]], 'selected'],
+    ['field', ['if', 'false',
+      ['record', ['first', additions(24999, 1)], ['second', 7]],
+      ['record', ['first', 11], ['second', additions(24999, 2)]]], 'second'],
     additions(65535, 1), ['if', ['u32-lt', 1, 2], additions(25000, 1), additions(24999, 2)]]) {
     writeFileSync(malformed, `(export main ${source(body)})`);
     for (const target of [output, join(scratch, 'over-limit.wasm')]) {

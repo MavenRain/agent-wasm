@@ -9,6 +9,8 @@ type term =
   | Pair of term * term
   | Fst of term
   | Snd of term
+  | Record of (string * term) list
+  | Field of term * string
   | Compare of comparison * term * term
   | If of term * term * term
   | Fn of term
@@ -16,6 +18,8 @@ type term =
   | Let of term * term
 
 type t = { body : term; arity : int }
+
+let program arity body = { body; arity }
 
 let run budget checked =
   (* Only the finite scalar shape survives, never source types or evidence. *)
@@ -27,12 +31,21 @@ let run budget checked =
         let* a = zero a in
         let* b = zero b in
         Ok (Pair (a, b))
+    | Ast.Record fields -> Result.map (fun fields -> Record fields) (zero_fields fields)
     | Ast.Sum (a, b) ->
         let* a = zero a in
         let* b = zero b in
         Ok (Pair (Const 1L, Pair (a, b)))
     | Ast.Refine (a, _) -> zero a
-    | Ast.Eq _ | Ast.Pi _ -> Error (Backend "unsupported sum payload")
+    | Ast.Eq _ | Ast.Pi _ -> Error (Backend "unsupported zero-fill payload")
+  and zero_fields fields =
+    let* () = Budget.tick budget in
+    match fields with
+    | [] -> Ok []
+    | (label, ty) :: rest ->
+        let* value = zero ty in
+        let* rest = zero_fields rest in
+        Ok ((label, value) :: rest)
   in
   let rec walk scope depth term =
     let* () = Budget.tick budget in
@@ -65,6 +78,10 @@ let run budget checked =
         Ok (Pair (a, b))
     | Ast.Fst a -> Result.map (fun a -> Fst a) (walk scope depth a)
     | Ast.Snd a -> Result.map (fun a -> Snd a) (walk scope depth a)
+    | Ast.RecordValue fields ->
+        Result.map (fun fields -> Record fields) (walk_fields scope depth fields)
+    | Ast.Field (value, label) ->
+        Result.map (fun value -> Field (value, label)) (walk scope depth value)
     | Ast.Pack (_, value, _) | Ast.Value value -> walk scope depth value
     | Ast.Evidence _ -> Error Runtime_proof
     | Ast.Compare (op, a, b) ->
@@ -72,6 +89,11 @@ let run budget checked =
         let* a = walk scope depth a in
         let* b = walk scope depth b in
         Ok (Compare (op, a, b))
+    | Ast.IfProof (_, c, a, b) ->
+        let* c = walk scope depth c in
+        let* a = walk (None :: scope) depth a in
+        let* b = walk (None :: scope) depth b in
+        Ok (If (c, a, b))
     | Ast.If (c, a, b) ->
         let* c = walk scope depth c in
         let* a = walk scope depth a in
@@ -97,6 +119,14 @@ let run budget checked =
     | Ast.Refl _ -> Error Runtime_proof
     | Ast.Transport (_, _, _, _, value) -> walk scope depth value
     | Ast.Ann (a, _) -> walk scope depth a
+  and walk_fields scope depth fields =
+    let* () = Budget.tick budget in
+    match fields with
+    | [] -> Ok []
+    | (label, value) :: rest ->
+        let* value = walk scope depth value in
+        let* rest = walk_fields scope depth rest in
+        Ok ((label, value) :: rest)
   in
   let* body = walk [] 0 (Kernel.term checked) in
   Ok { body; arity = Kernel.arity checked }
@@ -109,6 +139,10 @@ let dump program =
     | Pair (a, b) -> "(pair " ^ term a ^ " " ^ term b ^ ")"
     | Fst a -> "(fst " ^ term a ^ ")"
     | Snd a -> "(snd " ^ term a ^ ")"
+    | Record fields ->
+        "(record " ^ String.concat " "
+          (List.map (fun (label, value) -> "(" ^ label ^ " " ^ term value ^ ")") fields) ^ ")"
+    | Field (value, label) -> "(field " ^ term value ^ " " ^ label ^ ")"
     | Compare (op, a, b) ->
         let name = match op with Equal -> "u32-eq" | Less -> "u32-lt" | Less_equal -> "u32-le" in
         "(" ^ name ^ " " ^ term a ^ " " ^ term b ^ ")"

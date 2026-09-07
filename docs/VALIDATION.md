@@ -1,5 +1,127 @@
 # Compiler validation, 2026-09-06
 
+## M1 named records, 2026-09-06
+
+Implemented over `a754ce3` plus the staged checked-branch-evidence slice, in an
+isolated workspace checkout. The earlier staged changes are preserved.
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 303 cases, 0 failures
+  e2e: 1196 programs, 2392 host executions, erasure and rejection checks passed
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+The 69 new kernel cases cover ordered record identity, empty and duplicate
+fields, missing projections, finite payload restrictions, erased-field misuse,
+open and closed conversion, outer indices, substitution, refinement erasure,
+transport, checked branches, direct AST validation, and exact fuel exhaustion.
+They include regressions for neutral value/evidence projections through record
+fields and for rejecting pair projections on records. Three cases pin the
+label-specific parse diagnostic, one contrasts it with the binder diagnostic,
+and two pin the order that reports an empty or duplicate label before a field
+error. Four cases pin two contradictory if-proof nests, one over the same
+condition and one over a convertible condition, with their exact erased IR.
+Four cases call the backend on hand-built runtime terms to reach the
+conditional label mismatch, the conditional length mismatch, the field
+projection of a non-record, and the lookup of an absent field. Five further
+cases check negative and out-of-scope locals, negative and overflowing u32
+constants, and negative arity through the public runtime constructor. These
+malformed inputs return explicit errors before indexing or serialization.
+
+The fixed fuel boundaries were re-measured with the final binary. Run
+`_build/default/bin/main.exe --fuel N compile EXAMPLE OUT` at N and at N-1.
+`examples/refined-increment.aw` accepts at 366 and rejects at 365.
+`examples/budget-sum.aw` accepts at 468 and rejects at 467.
+`examples/record-policy.aw` accepts at 1411 and rejects at 1410.
+`examples/validated-ceiling.aw` accepts at 501 and rejects at 500.
+`main.exe check` reports 348, 341, 1277, and 440 steps for the same four
+examples, in that order. The boundaries 332/331 and 217/216 that earlier
+sections state were measured before later M1 slices added budget ticks, so
+they no longer hold.
+
+Record leaves count toward the backend limit of 50,000 parameters and locals.
+A conditional record spends one local for the condition, one local for each
+branch leaf that needs a computation, one merge local for each leaf of the
+result record, and one local for the branch effects. A leaf that is a literal
+or a bound variable needs no computation local. The first fixture gives every
+field its own addition, in the shape `(export main (fn (run x u32) (field (if
+(u32-lt x 100) (record (f0 (add x 0)) ...) (record (f0 (add x 1)) ...)) f1)))`.
+With one parameter this costs 1 + 3N + 3 parameters and locals, so N = 16665
+compiles to 617144 bytes and N = 16666 gives the backend error `function
+exceeds 50000 parameters and locals`. The second fixture gives every field a
+plain bound variable, the leaf shape of `examples/record-policy.aw`, and costs
+1 + N + 2, so N = 49997 compiles to 683518 bytes and N = 49998 gives the same
+backend error. Both boundaries were measured with a fuel limit above the step
+cost of the fixture. This is an accepted tradeoff of the local
+representation, not a defect.
+
+The independent evaluator uses named Maps for records, with eager construction
+and explicit field lookup. The 136 added programs cover the actual record-policy
+example, all field positions, closures, nested records, refined fields, records
+inside sums, and product/sum fields inside conditional records. The mixed random
+generator also produces records. Both hosts agree with the independent results.
+Local-limit fixtures retain computations from unselected fields. Twenty-one new
+CLI rejection forms, reserved-label checks, and local-limit rejections preserve
+existing output files and create no absent artifacts. Each record and branch
+rejection asserts its exact diagnostic, so no other guard can mask it. The two
+empty-record entries stay inside a u32-typed export, because a record-typed
+export is rejected first.
+
+Independent static reviews covered the core, runtime, evaluator, and example.
+Incomplete constructor matches found during development were corrected before
+the successful build; review found no remaining confirmed defect. No benchmark
+was refreshed or mechanized soundness claim added. Records remain internal
+finite data, with ordered fields and no dependent field binders or object ABI.
+
+## M1 checked branch evidence, 2026-09-06
+
+Implemented on base commit `a754ce3` in an isolated workspace checkout.
+
+```text
+sh scripts/check.sh
+  OK build: 0 errors, 0 warnings
+  kernel: 234 cases, 0 failures
+  e2e: 1060 programs, 2120 host executions, erasure and rejection checks passed
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+The 26 new kernel cases cover both evidence polarities, runtime proof rejection,
+condition phases, result formation and outer indices, unreachable branch
+checking, closed and stuck conversion, nested capture, parser scopes, exact
+fuel exhaustion, and identical IR/Wasm after evidence erasure. This slice did
+not change the fixed fuel boundaries. The values 332/331 for refinements and
+217/216 for sums were measured before later M1 slices added budget ticks. The
+current pins are 366/365 for `examples/refined-increment.aw` and 468/467 for
+`examples/budget-sum.aw`. Run
+`_build/default/bin/main.exe --fuel N compile EXAMPLE OUT` at N and at N-1 to
+reproduce them.
+
+The independent interpreter binds a witness for the selected boolean outcome.
+The 94 new programs cover the actual ceiling validator across unsigned
+boundaries, all three comparison operators, refined success and failure sums,
+nested branches and closures, and 30 generated conditional validators. Ten
+additional CLI rejections preserve existing artifacts and create no absent
+outputs. The public Wasm ABI remains integer-only.
+
+Five targeted mutations all built and were rejected by the kernel tests:
+wrong true polarity, wrong false polarity, missing result-type shift, missing
+branch-binder traversal depth, and missing erased scope entry. The result-shift
+mutation initially survived the kernel suite but failed the ceiling host
+fixture; a dedicated outer-index kernel regression now rejects it as well.
+Sources were restored and the full suite rerun after the mutations.
+
+No benchmark was refreshed or mechanized soundness claim added. The validator
+proves only its checked comparison; u32 addition still requires explicit
+overflow validation.
+
 ## M1 refined values, 2026-09-06
 
 Implemented on base commit `9b5b400` in an isolated workspace checkout:
@@ -33,7 +155,9 @@ A fixed refinement-returning case compiles in exactly 332 steps and rejects
 fuel 331. Recursive checks of sum alternatives and case result annotations,
 with new budget ticks in runtime type and type normalization, add 35 steps to
 the earlier fixed sum fixture: it now accepts at 217 and rejects at 216. These
-are intentional shared-budget changes.
+are intentional shared-budget changes. The numbers 332/331 and 217/216 are the
+measurement of this slice. Later M1 slices added more budget ticks: the current
+pins are 366/365 and 468/467.
 
 The independent named-variable interpreter represents refinements as packages
 containing a value and proof, distinct from the erased scalar/product runtime

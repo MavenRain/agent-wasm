@@ -20,9 +20,9 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: connect executable branches to evidence that their conditions succeeded,
-then add named records and general dependent pairs. Represent validation as a
-branch yielding either an error or a value with erased evidence. Domain example:
+Next: add general dependent pairs and compose the checked branch evidence
+into validators with explicit overflow errors. Validation can
+now yield either an error or a value with erased evidence. Domain example:
 a proposed tool action checked against an explicit immutable allowlist and price
 ceiling.
 Amounts need non-wrapping arithmetic or explicit overflow errors.
@@ -69,6 +69,22 @@ all indexed families are checked before erasure. The refined-increment example
 carries evidence of its modular result and emits the same IR and Wasm as the
 equivalent plain program. General dependent pairs and comparison-produced
 evidence remain open; an ordinary conditional does not refine its branches.
+
+Implemented eighth slice: `if-proof` binds erased evidence in each executable
+branch. The evidence states that the condition's u32 indicator equals 1 or 0,
+using the existing equality type. An explicit finite result type prevents the
+branch binder from escaping. The validated-ceiling example returns an internal
+error/refined-value sum and adapts it to the integer ABI. Its successful payload
+carries evidence that it meets the supplied ceiling. Arithmetic still wraps;
+overflow validation and immutable policy composition remain explicit work.
+
+Implemented ninth slice: internal named records with eager field construction
+and checked projection. Ordered, structural record types contain finite payloads
+and compose with refinements, sums, and checked branches. Field names do not
+bind indices or survive in Wasm. The record-policy example checks an immutable
+tool allowlist and price ceiling, returning an error or a refined named action
+before adapting to the scalar ABI. General dependent pairs and explicit
+overflow-aware arithmetic remain open.
 
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported

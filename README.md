@@ -176,6 +176,59 @@ program. It emits the same runtime IR and Wasm bytes as `increment-plain.aw`.
 Transport preserves only its value at runtime; it cannot replace executable
 validation or turn a comparison into a proof.
 
+## Checked branch evidence
+
+Use `if-proof` to construct refined values after executable validation:
+
+```text
+(if-proof u32 (u32-le amount ceiling)
+  (yes (let (erase proof (eq (if (u32-le amount ceiling) 1 0) 1))
+         yes amount))
+  (no 0))
+```
+
+The selected branch receives erased evidence that the condition's integer
+indicator equals 1 or 0. The result type is explicit, and both branches are
+checked. `examples/validated-ceiling.aw` uses this evidence to return an
+internal sum of an error or a refined accepted amount, then exposes its value
+as u32.
+
+```sh
+_build/default/bin/main.exe compile examples/validated-ceiling.aw /tmp/ceil.wasm
+wasmtime run --invoke main /tmp/ceil.wasm 75 100
+```
+
+This returns 75. An amount above the ceiling returns 0. The internal sum keeps
+rejection distinct from an accepted zero; this scalar adapter discards the tag.
+Evidence erases to an ordinary conditional and adds no runtime proof storage.
+
+## Named records
+
+Use names for internal action fields:
+
+```text
+(let (run action (record (tool u32) (price u32)))
+  (record (tool 7) (price 75))
+  (field action price))
+```
+
+Records are nonempty, have unique labels, and keep their declared field order
+as part of the type. Fields support nested finite data and refined values.
+Construction evaluates every field; projection preserves that work. Labels
+support static selection and add no Wasm object representation.
+
+`examples/record-policy.aw` checks a named action against tool IDs 7 or 9 and
+a price ceiling of 100. A successful internal sum contains the refined action
+and erased evidence of the policy decision. The scalar adapter returns the
+accepted price plus 1, with 0 reserved for rejection.
+
+```sh
+_build/default/bin/main.exe compile examples/record-policy.aw /tmp/policy.wasm
+wasmtime run --invoke main /tmp/policy.wasm 7 75
+```
+
+This returns 76; tool 8 or a price of 101 returns 0.
+
 ## Validate
 
 ```sh

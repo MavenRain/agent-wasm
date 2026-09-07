@@ -15,6 +15,18 @@ let kernel_rejects expected body =
     ~error:(fun actual -> if actual = expected then Ok () else Error actual)
     (Compiler.check ("(export main " ^ body ^ ")"))
 
+let erases_to expected body =
+  let* artifact = compile body in
+  if artifact.Compiler.runtime = expected then Ok ()
+  else Error (Backend artifact.Compiler.runtime)
+
+(* Backend clients may hold runtime terms the kernel never produces. *)
+let backend_rejects expected term =
+  Result.fold
+    ~ok:(fun _wasm -> Error (Backend "unexpected acceptance"))
+    ~error:(fun actual -> if actual = expected then Ok () else Error actual)
+    (Wasm.emit (Budget.create 100_000) (Erase.program 0 term))
+
 let same_output a b =
   let* a = compile a in
   let* b = compile b in
@@ -26,6 +38,24 @@ let dependent n x proof =
   "(fn (erase n u32) (fn (run x u32) (fn (erase p (eq x n)) x))) " ^
   n ^ ") " ^ x ^ ") " ^ proof ^ ")"
 
+(* A contradictory nest of if-proofs over one condition. Both polarities of
+   the evidence reach the inner arm, so its body is dead only because the
+   erased conditional tests the same condition. See docs/SPEC.md. *)
+let ceiling = "(refine (n u32) (eq (if (u32-le n 100) 1 0) 1))"
+let forged = "(transport (m (eq m 1)) (if (u32-le x 100) 1 0) 0 no yes)"
+let contradiction_nest =
+  "(fn (run x u32) (value (if-proof " ^ ceiling ^ " (u32-le x 100) " ^
+  "(yes (pack " ^ ceiling ^ " x yes)) (no (if-proof " ^ ceiling ^
+  " (u32-le x 100) (yes (pack " ^ ceiling ^ " 200 " ^ forged ^ ")) " ^
+  "(no (pack " ^ ceiling ^ " 0 (refl 1))))))))"
+
+(* The same contradiction reached through conversion: the inner condition is
+   a field projection that normalizes to the outer condition. *)
+let convertible_nest =
+  "(fn (run x u32) (if-proof u32 (u32-le x 100) (yes 1) " ^
+  "(no (if-proof u32 (field (record (c (u32-le x 100))) c) " ^
+  "(yes (transport (m u32) 0 1 " ^ forged ^ " 7)) (no 0)))))"
+
 (* Direct AST clients bypass the parser's depth limit. *)
 let emit_parameters count =
   let budget = Budget.create 1_000_000 in
@@ -36,6 +66,223 @@ let emit_parameters count =
   Wasm.emit budget runtime
 
 let cases = [
+  "backend negative local", (fun () ->
+    backend_rejects (Invalid_index (-1)) (Erase.Local (-1)));
+  "backend out-of-scope local", (fun () ->
+    backend_rejects (Invalid_index 0) (Erase.Local 0));
+  "backend negative constant", (fun () ->
+    backend_rejects (Invalid_u32 (-1L)) (Erase.Const (-1L)));
+  "backend overflowing constant", (fun () ->
+    backend_rejects (Invalid_u32 0x1_0000_0000L) (Erase.Const 0x1_0000_0000L));
+  "backend negative arity", (fun () ->
+    Result.fold
+      ~ok:(fun _ -> Error (Backend "negative arity accepted"))
+      ~error:(fun actual ->
+        if actual = Backend "negative function arity" then Ok () else Error actual)
+      (Wasm.emit (Budget.create 1000) (Erase.program (-1) (Erase.Const 0L))));
+  "record named projection", (fun () -> accepted
+    "(let (run action (record (tool u32) (enabled bool) (price u32))) (record (tool 7) (enabled true) (price 42)) (if (field action enabled) (add (field action tool) (field action price)) 0))");
+  "record singleton", (fun () -> accepted "(field (record (amount 42)) amount)");
+  "record nested finite fields", (fun () -> accepted
+    "(snd (field (field (record (nested (record (values (pair true 42))))) nested) values))");
+  "record labels are not binders", (fun () -> accepted
+    "(fn (run amount u32) (field (record (amount 7) (other amount)) other))");
+  "record label absent from later value scope", (fun () -> rejected (Unknown_name "amount")
+    "(field (record (amount 7) (other amount)) other)");
+  "record label absent from later type scope", (fun () -> rejected (Unknown_name "amount")
+    "(fn (run action (record (amount u32) (other (refine (x u32) (eq x amount))))) 0)");
+  "record empty value", (fun () -> kernel_rejects Empty_record "(record)");
+  "record empty type", (fun () -> kernel_rejects Empty_record
+    "(fn (run action (record)) 0)");
+  "record duplicate value", (fun () -> kernel_rejects (Duplicate_field "amount")
+    "(field (record (amount 1) (amount 2)) amount)");
+  "record duplicate type", (fun () -> kernel_rejects (Duplicate_field "amount")
+    "(fn (run action (record (amount u32) (amount bool))) 0)");
+  "record duplicate precedes field error", (fun () ->
+    kernel_rejects (Duplicate_field "amount")
+    "(field (record (amount (add true 1)) (amount 2)) amount)");
+  "record empty precedes field error", (fun () -> kernel_rejects Empty_record
+    "(let (run action (record)) (record (tool (add true 1))) 0)");
+  "record unknown field", (fun () -> kernel_rejects (Unknown_field "price")
+    "(field (record (tool 7)) price)");
+  "record scalar projection", (fun () -> kernel_rejects Type_mismatch "(field 7 price)");
+  "record is not product fst", (fun () -> kernel_rejects Type_mismatch
+    "(fst (record (first 7) (second 9)))");
+  "record is not product snd", (fun () -> kernel_rejects Type_mismatch
+    "(snd (record (first 7) (second 9)))");
+  "record label mismatch", (fun () -> kernel_rejects Type_mismatch
+    "(let (run action (record (tool u32))) (record (price 7)) 0)");
+  "record order is structural", (fun () -> kernel_rejects Type_mismatch
+    "(let (run action (record (tool u32) (price u32))) (record (price 42) (tool 7)) 0)");
+  "record field type mismatch", (fun () -> kernel_rejects Type_mismatch
+    "(let (run action (record (tool u32) (price u32))) (record (tool 7) (price true)) 0)");
+  "record checks unselected field", (fun () -> kernel_rejects Type_mismatch
+    "(field (record (tool 7) (price (add true 1))) tool)");
+  "record checks unreachable branch", (fun () -> kernel_rejects Type_mismatch
+    "(field (if true (record (tool 7)) (record (price 9))) tool)");
+  "record erased field use", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase secret u32) 42 (field (record (tool 7) (price secret)) tool))");
+  "record erased value use", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase action (record (tool u32))) (record (tool 7)) (field action tool))");
+  "record runtime proof field", (fun () -> kernel_rejects Runtime_proof
+    "(field (record (tool 7) (proof (refl 7))) tool)");
+  "record ghost proof field", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase action (record (proof (eq 7 7)))) (record (proof (refl 7))) 0)");
+  "record function field type", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run action (record (tool (pi (run n u32) u32)))) 0)");
+  "record function field value", (fun () -> kernel_rejects Type_mismatch
+    "(field (record (tool 7) (callback (fn (run n u32) n))) tool)");
+  "record nested invalid refinement", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run action (record (price (refine (x u32) (eq true x))))) 0)");
+  "record export result", (fun () -> kernel_rejects Unsupported_export
+    "(record (tool 7) (price 42))");
+  "record export parameter", (fun () -> kernel_rejects Unsupported_export
+    "(fn (run action (record (tool u32))) (field action tool))");
+  "record malformed value field", (fun () -> rejected (Parse "invalid record field")
+    "(field (record (tool 7 9)) tool)");
+  "record malformed type field", (fun () -> rejected (Parse "invalid record field")
+    "(fn (run action (record tool)) 0)");
+  "record reserved label", (fun () -> rejected (Parse "record label is reserved for literals")
+    "(field (record (true 7)) tool)");
+  "record reserved numeric label", (fun () ->
+    rejected (Parse "record label is reserved for literals")
+    "(field (record (1a 7)) tool)");
+  "record reserved selector", (fun () ->
+    rejected (Parse "record label is reserved for literals")
+    "(field (record (tool 7)) 1a)");
+  "record binder name is not a label", (fun () ->
+    rejected (Parse "binder name is reserved for literals")
+    "(fn (run true (record (tool u32))) 0)");
+  "record closed conversion", (fun () -> accepted
+    "(let (erase e (eq (field (record (price (add 20 22)) (tool 7)) price) 42)) (refl 42) 0)");
+  "record wrong conversion", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase e (eq (field (record (tool 7) (price 42)) price) 7)) (refl 7) 0)");
+  "record open projection normalizes", (fun () -> accepted
+    "(app run (fn (run action (record (price u32))) (let (erase e (eq (field (app run (fn (run copy (record (price u32))) copy) action) price) (field action price))) (refl (field action price)) 0)) (record (price 42)))");
+  "record open projection remains symbolic", (fun () -> kernel_rejects Type_mismatch
+    "(app run (fn (run action (record (price u32))) (let (erase e (eq (field action price) 42)) (refl 42) 0)) (record (price 42)))");
+  "record refined field open conversion", (fun () -> accepted
+    "(app run (fn (run r (record (x (refine (v u32) (eq v v))))) (let (erase p (eq (value (field r x)) (value (field r x)))) (refl (value (field r x))) 0)) (record (x (pack (refine (v u32) (eq v v)) 7 (refl 7)))))");
+  "record refined field open evidence conversion", (fun () -> accepted
+    "(app run (fn (run r (record (p (refine (v u32) (eq 0 0))))) (let (erase e (eq (transport (i u32) 0 0 (evidence (field r p)) 7) (transport (i u32) 0 0 (evidence (field r p)) 7))) (refl (transport (i u32) 0 0 (evidence (field r p)) 7)) 42)) (record (p (pack (refine (v u32) (eq 0 0)) 8 (refl 0)))))");
+  "record open projection labels stay distinct", (fun () -> kernel_rejects Type_mismatch
+    "(app run (fn (run action (record (tool u32) (price u32))) (let (erase e (eq (field action tool) (field action price))) (refl (field action tool)) 0)) (record (tool 7) (price 7)))");
+  "record outer type index", (fun () -> accepted
+    "(fn (run n u32) (let (run action (record (n u32) (price (refine (x u32) (eq x n))))) (record (n 7) (price (pack (refine (x u32) (eq x n)) n (refl n)))) (value (field action price))))");
+  "record dependent application capture", (fun () -> accepted
+    "(fn (run n u32) (app erase (app run (fn (run action (record (price u32))) (fn (erase e (eq (field action price) n)) (field action price))) (record (price n))) (refl n)))");
+  "record indexed case result", (fun () -> accepted
+    "(fn (run n u32) (value (field (case (record (price (refine (x u32) (eq x n)))) (inl u32 0) (left (record (price (pack (refine (x u32) (eq x n)) n (refl n))))) (right (record (price (pack (refine (x u32) (eq x n)) n (refl n)))))) price)))");
+  "record refinement payload erasure", (fun () -> same_output
+    "(fn (run n u32) (field (value (pack (refine (a (record (price u32))) (eq (field a price) n)) (record (price n)) (refl n))) price))"
+    "(fn (run n u32) (field (record (price n)) price))");
+  "record refinement field erasure", (fun () -> same_output
+    "(fn (run n u32) (value (field (record (tool 7) (price (pack (refine (x u32) (eq x n)) n (refl n)))) price)))"
+    "(fn (run n u32) (field (record (tool 7) (price n)) price))");
+  "record ghost erasure", (fun () -> same_output
+    "(let (erase action (record (tool u32) (price u32))) (record (tool 7) (price (add 20 22))) 42)" "42");
+  "record transport indexed fields", (fun () -> accepted
+    "(fn (run n u32) (value (field (transport (i (record (price (refine (x u32) (eq x i))))) n n (refl n) (record (price (pack (refine (x u32) (eq x n)) n (refl n))))) price)))");
+  "record branch evidence erasure", (fun () -> same_output
+    "(fn (run n u32) (field (if-proof (record (price u32) (allowed bool)) (u32-le n 100) (yes (record (price n) (allowed true))) (no (record (price 0) (allowed false)))) price))"
+    "(fn (run n u32) (field (if (u32-le n 100) (record (price n) (allowed true)) (record (price 0) (allowed false))) price))");
+  "record exact compilation budget", (fun () ->
+    let source = "(export main (fn (run n u32) (field (if (u32-le n 100) (record (tool 7) (price (add n 1))) (record (tool 9) (price (add n 2)))) price)))" in
+    let* artifact = Compiler.compile source in
+    let* exact = Compiler.compile ~fuel:artifact.steps source in
+    let* () = if artifact.wasm = exact.wasm then Ok () else Error (Backend "record budget changed output") in
+    Result.fold ~ok:(fun _ -> Error (Backend "record fuel boundary accepted"))
+      ~error:(function Budget_exhausted -> Ok () | e -> Error e)
+      (Compiler.compile ~fuel:(artifact.steps - 1) source));
+  "record direct AST duplicate value", (fun () -> Result.fold
+    ~ok:(fun _ -> Error (Backend "duplicate AST record accepted"))
+    ~error:(fun e -> if e = Duplicate_field "x" then Ok () else Error e)
+    (Kernel.check (Budget.create 1000)
+      (Ast.Field (Ast.RecordValue ["x", Ast.Lit 1L; "x", Ast.Lit 2L], "x"))));
+  "record direct AST empty type", (fun () -> Result.fold
+    ~ok:(fun _ -> Error (Backend "empty AST record accepted"))
+    ~error:(fun e -> if e = Empty_record then Ok () else Error e)
+    (Kernel.check (Budget.create 1000) (Ast.Lam (Ast.Runtime, Ast.Record [], Ast.Lit 0L))));
+  "record type substitution does not bind fields", (fun () ->
+    let open Ast in
+    let body = Record ["price", Refine (U32, Eq (Var 0, Var 1));
+      "nested", Record ["amount", Refine (U32, Eq (Var 0, Var 1))]] in
+    let* actual = subst_ty (Budget.create 1000) (Add (Var 0, Lit 1L)) body in
+    let field = Refine (U32, Eq (Var 0, Add (Var 1, Lit 1L))) in
+    let expected = Record ["price", field; "nested", Record ["amount", field]] in
+    if actual = expected then Ok () else Error (Backend "record field type capture"));
+  "record term substitution does not bind labels", (fun () ->
+    let open Ast in
+    let body = Field (RecordValue ["first", Var 0; "second", Var 1], "second") in
+    let* actual = subst_term (Budget.create 1000) (Field (Var 0, "price")) body in
+    let expected = Field (RecordValue ["first", Field (Var 0, "price"); "second", Var 0], "second") in
+    if actual = expected then Ok () else Error (Backend "record field term capture"));
+  "branch evidence result captures outer index", (fun () -> accepted
+    "(fn (run n u32) (value (if-proof (refine (x u32) (eq x n)) (u32-le n 100) (p (pack (refine (x u32) (eq x n)) n (refl n))) (q (pack (refine (x u32) (eq x n)) n (refl n))))))");
+  "branch evidence exact fuel boundary", (fun () ->
+    let source = "(export main (fn (run n u32) (if-proof u32 (u32-le n 100) (p n) (q 0))))" in
+    let* artifact = Compiler.compile source in
+    let* exact = Compiler.compile ~fuel:artifact.steps source in
+    let* () = if artifact.wasm = exact.wasm then Ok () else Error (Backend "branch budget changed output") in
+    Result.fold ~ok:(fun _ -> Error (Backend "branch fuel boundary accepted"))
+      ~error:(function Budget_exhausted -> Ok () | e -> Error e)
+      (Compiler.compile ~fuel:(artifact.steps - 1) source));
+  "branch evidence ghost condition", (fun () -> accepted
+    "(let (erase b bool) true (let (erase x u32) (if-proof u32 b (p 1) (q 0)) 0))");
+  "branch evidence malformed syntax", (fun () -> rejected (Parse "invalid term form")
+    "(if-proof u32 true (p 1) 0)");
+  "branch evidence nested proof capture", (fun () -> accepted
+    "(fn (run n u32) (if-proof u32 (u32-le n 100) (p (if-proof u32 (u32-eq n 0) (q (let (erase e (eq (if (u32-le n 100) 1 0) 1)) p n)) (q n))) (p 0)))");
+  "branch evidence erases", (fun () -> same_output
+    "(fn (run n u32) (if-proof u32 (u32-le n 100) (p (let (erase e (eq (if (u32-le n 100) 1 0) 1)) p (add n 1))) (q (let (erase e (eq (if (u32-le n 100) 1 0) 0)) q (add n 2)))))"
+    "(fn (run n u32) (if (u32-le n 100) (add n 1) (add n 2)))");
+  "branch evidence constructs refinement", (fun () -> accepted
+    "(fn (run n u32) (value (if-proof (refine (x u32) (eq (if (u32-le x 100) 1 0) 1)) (u32-le n 100) (p (pack (refine (x u32) (eq (if (u32-le x 100) 1 0) 1)) n p)) (q (pack (refine (x u32) (eq (if (u32-le x 100) 1 0) 1)) 0 (refl 1))))))");
+  "branch evidence false arm polarity", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run n u32) (if-proof u32 (u32-le n 100) (p 0) (q (let (erase e (eq (if (u32-le n 100) 1 0) 1)) q 1))))");
+  "branch evidence true arm polarity", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run n u32) (if-proof u32 (u32-le n 100) (p (let (erase e (eq (if (u32-le n 100) 1 0) 0)) p 1)) (q 0)))");
+  "branch evidence runtime use", (fun () -> kernel_rejects (Erased_use 0)
+    "(if-proof u32 true (p p) (q 0))");
+  "branch evidence false arm runtime use", (fun () -> kernel_rejects (Erased_use 0)
+    "(if-proof u32 true (p 0) (q q))");
+  "branch evidence condition executes", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase b bool) true (if-proof u32 b (p 1) (q 0)))");
+  "branch evidence condition type", (fun () -> kernel_rejects Type_mismatch
+    "(if-proof u32 1 (p 1) (q 0))");
+  "branch evidence checks unreachable arm", (fun () -> kernel_rejects Type_mismatch
+    "(if-proof u32 true (p 1) (q false))");
+  "branch evidence proof result rejected", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase e (eq 1 1)) (if-proof (eq 1 1) true (p p) (q (refl 1))) 0)");
+  "branch evidence function result rejected", (fun () -> kernel_rejects Type_mismatch
+    "(if-proof (pi (run x u32) u32) true (p (fn (run x u32) x)) (q (fn (run x u32) x)))");
+  "branch evidence result formation", (fun () -> kernel_rejects Expected_function
+    "(value (if-proof (refine (x u32) (eq (app run 1 2) x)) true (p (pack (refine (x u32) (eq x x)) 1 (refl 1))) (q (pack (refine (x u32) (eq x x)) 1 (refl 1)))))");
+  "branch evidence closed true conversion", (fun () -> accepted
+    "(let (erase e (eq (if-proof u32 (u32-lt 1 2) (p (value (transport (i (refine (x u32) (eq x i))) 1 1 p (pack (refine (x u32) (eq x 1)) 1 (refl 1))))) (q 0)) 1)) (refl 1) 0)");
+  "branch evidence closed false conversion", (fun () -> accepted
+    "(let (erase e (eq (if-proof u32 false (p 9) (q (value (pack (refine (x u32) (eq x 0)) 0 q)))) 0)) (refl 0) 0)");
+  "branch evidence closed wrong endpoint", (fun () -> kernel_rejects Type_mismatch
+    "(let (erase e (eq (if-proof u32 false (p 9) (q 0)) 9)) (refl 9) 0)");
+  "branch evidence stuck condition stays symbolic", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run n u32) (let (erase e (eq (if-proof u32 (u32-eq n 0) (p 1) (q 2)) 1)) (refl 1) 0))");
+  "branch evidence shadowing", (fun () -> same_output
+    "(fn (run n u32) (if-proof u32 (u32-eq n 0) (n (let (run n u32) 7 n)) (n 8)))"
+    "(fn (run n u32) (if (u32-eq n 0) (let (run n u32) 7 n) 8))");
+  "branch evidence parser scope", (fun () -> rejected (Unknown_name "p")
+    "(if-proof u32 p (p 1) (q 0))");
+  "branch evidence distinct branch scopes", (fun () -> rejected (Unknown_name "p")
+    "(if-proof u32 true (p 1) (q (let (erase e (eq 1 1)) p 0)))");
+  "branch evidence reserved binder", (fun () -> rejected (Parse "binder name is reserved for literals")
+    "(if-proof u32 true (true 1) (q 0))");
+  "branch evidence substitution depth", (fun () ->
+    let open Ast in
+    let body = IfProof (Refine (U32, Eq (Var 0, Var 2)),
+      Compare (Equal, Var 0, Lit 0L), Var 1, Var 1) in
+    let* actual = subst_term (Budget.create 1000) (Lit 7L) body in
+    let expected = IfProof (Refine (U32, Eq (Var 0, Var 1)),
+      Compare (Equal, Lit 7L, Lit 0L), Lit 7L, Lit 7L) in
+    if actual = expected then Ok () else Error (Backend "branch evidence capture"));
   "refinement fixed compilation budget", (fun () ->
     let source = "(export main (fn (run n u32) (value (case (refine (x u32) (eq x n)) (if (u32-eq n 0) (inl bool n) (inr u32 false)) (a (pack (refine (x u32) (eq x n)) n (refl n))) (b (pack (refine (x u32) (eq x n)) n (refl n)))))))" in
     let* artifact = Compiler.compile ~fuel:332 source in
@@ -486,6 +733,30 @@ let cases = [
       (Ast.Lam (Ast.Runtime, Ast.U32, Ast.Add (Ast.Var 1, Ast.Var 0))) in
     let expected = Ast.Lam (Ast.Runtime, Ast.U32, Ast.Add (Ast.Var 1, Ast.Var 0)) in
     if actual = expected then Ok () else Error (Backend "variable capture"));
+  "branch evidence contradiction accepted", (fun () -> accepted contradiction_nest);
+  "branch evidence contradiction is dead", (fun () -> erases_to
+    "(export main (fn (if (u32-le v0 100) v0 (if (u32-le v0 100) 200 0))))\n"
+    contradiction_nest);
+  "branch evidence convertible nest accepted", (fun () ->
+    accepted convertible_nest);
+  "branch evidence convertible nest is dead", (fun () -> erases_to
+    ("(export main (fn (if (u32-le v0 100) 1 " ^
+     "(if (field (record (c (u32-le v0 100))) c) 7 0))))\n")
+    convertible_nest);
+  "backend conditional record label mismatch", (fun () ->
+    backend_rejects (Backend "conditional record label mismatch")
+      (Erase.If (Erase.Const 1L, Erase.Record [("a", Erase.Const 1L)],
+        Erase.Record [("b", Erase.Const 2L)])));
+  "backend conditional record length mismatch", (fun () ->
+    backend_rejects (Backend "conditional record length mismatch")
+      (Erase.If (Erase.Const 1L, Erase.Record [("a", Erase.Const 1L)],
+        Erase.Record [("a", Erase.Const 1L); ("b", Erase.Const 2L)])));
+  "backend field projection of non-record", (fun () ->
+    backend_rejects (Backend "field projection of non-record")
+      (Erase.Field (Erase.Const 1L, "a")));
+  "backend record field lookup failure", (fun () ->
+    backend_rejects (Backend "unknown record field: b")
+      (Erase.Field (Erase.Record [("a", Erase.Const 1L)], "b")));
 ]
 
 let () =

@@ -60,8 +60,15 @@ let numeric_name name =
     ~some:(fun (c, _) -> digit c || c = '+' || c = '-')
     (Seq.uncons (String.to_seq name))
 
+let reserved name = numeric_name name || name = "true" || name = "false"
 let binder name =
-  if numeric_name name || name = "true" || name = "false" then Error (Parse "binder name is reserved for literals")
+  if reserved name then Error (Parse "binder name is reserved for literals")
+  else Ok ()
+
+(* Record labels obey the same lexical rule as binders, but bind no name, so
+   the diagnostic names the label rather than a binder. *)
+let label name =
+  if reserved name then Error (Parse "record label is reserved for literals")
   else Ok ()
 
 let atom names name =
@@ -79,6 +86,18 @@ let atom names name =
       else Ok next) (Ok 0L) name
     |> Result.map (fun n -> Lit n)
 
+let record_fields budget parse fields =
+  let rec walk acc = function
+    | [] -> Ok (List.rev acc)
+    | List [Atom name; value] :: rest ->
+        let* () = Budget.tick budget in
+        let* () = label name in
+        let* value = parse value in
+        walk ((name, value) :: acc) rest
+    | (Atom _ | List _) :: _ -> Error (Parse "invalid record field")
+  in
+  walk [] fields
+
 let rec ty budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -88,6 +107,9 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget names b in
       Ok (Sum (a, b))
+  | List (Atom "record" :: fields) ->
+      let* fields = record_fields budget (ty budget names) fields in
+      Ok (Record fields)
   | List [Atom "product"; a; b] ->
       let* a = ty budget names a in
       let* b = ty budget names b in
@@ -107,7 +129,7 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
       Ok (Pi (r, a, b))
-  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, sum, refine, eq, or pi type")
+  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, record, sum, refine, eq, or pi type")
 and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -131,6 +153,13 @@ and term budget names tree =
       let* a = term budget (left :: names) a in
       let* b = term budget (right :: names) b in
       Ok (Case (result, value, a, b))
+  | List (Atom "record" :: fields) ->
+      let* fields = record_fields budget (term budget names) fields in
+      Ok (RecordValue fields)
+  | List [Atom "field"; value; Atom name] ->
+      let* () = label name in
+      let* value = term budget names value in
+      Ok (Field (value, name))
   | List [Atom "pair"; a; b] ->
       let* a = term budget names a in
       let* b = term budget names b in
@@ -149,6 +178,14 @@ and term budget names tree =
       let* a = term budget names a in
       let* b = term budget names b in
       Ok (Compare (op, a, b))
+  | List [Atom "if-proof"; result; c; List [Atom yes; a]; List [Atom no; b]] ->
+      let* () = binder yes in
+      let* () = binder no in
+      let* result = ty budget names result in
+      let* c = term budget names c in
+      let* a = term budget (yes :: names) a in
+      let* b = term budget (no :: names) b in
+      Ok (IfProof (result, c, a, b))
   | List [Atom "if"; c; a; b] ->
       let* c = term budget names c in
       let* a = term budget names a in
