@@ -65,7 +65,232 @@ let emit_parameters count =
   let* runtime = Erase.run budget checked in
   Wasm.emit budget runtime
 
+let sigma_budget_source = {|
+  (export main (fn (run n u32)
+    (value (snd (if (u32-le n 100)
+      (dpair (sigma (x u32) (refine (y u32) (eq y x))) n
+        (pack (refine (y u32) (eq y n)) n (refl n)))
+      (dpair (sigma (x u32) (refine (y u32) (eq y x))) 0
+        (pack (refine (y u32) (eq y 0)) 0 (refl 0)))))))) |}
+
 let cases = [
+  "sigma fixed compilation budget", (fun () ->
+    let* artifact = Compiler.compile ~fuel:405 sigma_budget_source in
+    let* () = if artifact.steps = 405 then Ok ()
+      else Error (Backend "sigma budget changed") in
+    Result.fold ~ok:(fun _ -> Error (Backend "sigma fuel boundary accepted"))
+      ~error:(function Budget_exhausted -> Ok () | e -> Error e)
+      (Compiler.compile ~fuel:404 sigma_budget_source));
+  "sigma dependent construction", (fun () -> accepted {|
+    (fn (run n u32)
+      (value (snd (dpair
+        (sigma (x u32) (refine (y u32) (eq y (add x 1)))) n
+        (pack (refine (y u32) (eq y (add n 1)))
+          (add n 1) (refl (add n 1))))))) |});
+  "sigma abstract second projection", (fun () -> accepted {|
+    (let (erase consume
+      (pi (run p (sigma (x u32) (refine (y u32) (eq y x))))
+        (eq (value (snd p)) (fst p))))
+      (fn (run p (sigma (x u32) (refine (y u32) (eq y x))))
+        (evidence (snd p))) 0) |});
+  "sigma abstract second wrong index", (fun () -> kernel_rejects Type_mismatch {|
+    (let (erase consume
+      (pi (run p (sigma (x u32) (refine (y u32) (eq y x))))
+        (eq (value (snd p)) 0)))
+      (fn (run p (sigma (x u32) (refine (y u32) (eq y x))))
+        (evidence (snd p))) 0) |});
+  "sigma wrong dependent field", (fun () -> kernel_rejects Type_mismatch {|
+    (value (snd (dpair (sigma (x u32) (refine (y u32) (eq y x))) 7
+      (pack (refine (y u32) (eq y 8)) 8 (refl 8))))) |});
+  "sigma wrong first field", (fun () -> kernel_rejects Type_mismatch
+    "(fst (dpair (sigma (x u32) u32) true 7))");
+  "sigma wrong second field", (fun () -> kernel_rejects Type_mismatch
+    "(fst (dpair (sigma (x u32) u32) 7 true))");
+  "sigma requires annotation", (fun () -> kernel_rejects Type_mismatch
+    "(fst (dpair (product u32 u32) 7 9))");
+  "sigma distinct from product", (fun () -> kernel_rejects Type_mismatch
+    "(fst (ann (pair 7 9) (sigma (x u32) u32)))");
+  "sigma product annotation rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fst (ann (dpair (sigma (x u32) u32) 7 9) (product u32 u32)))");
+  "sigma first proof rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (sigma (x (eq 0 0)) u32)) 0)");
+  "sigma second proof rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (sigma (x u32) (eq x x))) 0)");
+  "sigma first function rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (sigma (f (pi (run x u32) u32)) u32)) 0)");
+  "sigma second function rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (sigma (x u32) (pi (run y u32) u32))) 0)");
+  "sigma nested function rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (run p (sigma (x u32) (product u32 (pi (run y u32) u32)))) 0)");
+  "sigma ghost function rejected", (fun () -> kernel_rejects Type_mismatch
+    "(fn (erase p (sigma (x u32) (pi (run y u32) u32))) 0)");
+  "sigma erased first field", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase n u32) 7 (snd (dpair (sigma (x u32) u32) n 9)))");
+  "sigma erased second field", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase n u32) 7 (fst (dpair (sigma (x u32) u32) 9 n)))");
+  "sigma erased package", (fun () -> kernel_rejects (Erased_use 0)
+    "(let (erase p (sigma (x u32) u32)) (dpair (sigma (x u32) u32) 7 9) (snd p))");
+  "sigma ghost fields", (fun () -> same_output {|
+    (let (erase n u32) 7
+      (let (erase p (sigma (x u32) u32))
+        (dpair (sigma (x u32) u32) n n)
+        (let (erase e (eq (snd p) (snd p))) (refl (snd p)) 42))) |} "42");
+  "sigma malformed first family", (fun () -> kernel_rejects Type_mismatch {|
+    (fn (run p (sigma (x (refine (v u32) (eq true v))) u32)) 0) |});
+  "sigma malformed second family", (fun () -> kernel_rejects Type_mismatch {|
+    (fn (run p (sigma (x u32) (refine (y u32) (eq true x)))) 0) |});
+  "sigma formation before conversion", (fun () -> kernel_rejects Type_mismatch {|
+    (fst (dpair
+      (sigma (x u32) (refine (y u32) (eq (if true y false) x))) 7
+      (pack (refine (y u32) (eq y 7)) 7 (refl 7)))) |});
+  "sigma inactive sum family formed", (fun () -> kernel_rejects Type_mismatch {|
+    (case u32 (inl
+      (sigma (x u32) (refine (y u32) (eq true x))) 7)
+      (n n) (p 0)) |});
+  "sigma case result family formed", (fun () -> kernel_rejects Type_mismatch {|
+    (fst (case
+      (sigma (x u32) (refine (y u32) (eq (if true y false) x)))
+      (inl u32 7)
+      (n (dpair (sigma (x u32) (refine (y u32) (eq y x))) n
+        (pack (refine (y u32) (eq y n)) n (refl n))))
+      (n (dpair (sigma (x u32) (refine (y u32) (eq y x))) n
+        (pack (refine (y u32) (eq y n)) n (refl n)))))) |});
+  "sigma closed first conversion", (fun () -> accepted {|
+    (let (erase e (eq (fst (dpair (sigma (x u32) u32) (add 3 4) 9)) 7))
+      (refl 7) 0) |});
+  "sigma closed second conversion", (fun () -> accepted {|
+    (let (erase e (eq (snd (dpair (sigma (x u32) u32) 7 (add 4 5))) 9))
+      (refl 9) 0) |});
+  "sigma open projections distinct", (fun () -> kernel_rejects Type_mismatch {|
+    (let (erase f (pi (run p (sigma (x u32) u32)) (eq (fst p) (snd p))))
+      (fn (run p (sigma (x u32) u32)) (refl (fst p))) 0) |});
+  "sigma open projections reflexive", (fun () -> accepted {|
+    (let (erase f (pi (run p (sigma (x u32) u32)) (eq (fst p) (fst p))))
+      (fn (run p (sigma (x u32) u32)) (refl (fst p))) 0) |});
+  "sigma open projection normalizes operand", (fun () -> accepted {|
+    (let (erase f (pi (run p (sigma (x u32) u32))
+      (eq (snd (app run (fn (run q (sigma (x u32) u32)) q) p)) (snd p))))
+      (fn (run p (sigma (x u32) u32)) (refl (snd p))) 0) |});
+  "sigma projection stays stuck on if", (fun () -> kernel_rejects Type_mismatch {|
+    (fn (run n u32)
+      (let (erase e (eq
+        (fst (if (u32-eq n 0) (dpair (sigma (x u32) u32) 7 9)
+          (dpair (sigma (x u32) u32) 7 9))) 7)) (refl 7) 0)) |});
+  "sigma dependent record index", (fun () -> accepted {|
+    (value (snd (dpair
+      (sigma (r (record (amount u32)))
+        (refine (y u32) (eq y (field r amount))))
+      (record (amount 7))
+      (pack (refine (y u32) (eq y 7)) 7 (refl 7))))) |});
+  "sigma nested abstract evidence", (fun () -> accepted {|
+    (let (erase f
+      (pi (run p (sigma (x u32)
+        (sigma (y u32) (refine (z u32) (eq z (add x y))))))
+        (eq (value (snd (snd p))) (add (fst p) (fst (snd p))))))
+      (fn (run p (sigma (x u32)
+        (sigma (y u32) (refine (z u32) (eq z (add x y))))))
+        (evidence (snd (snd p)))) 0) |});
+  "sigma stuck evidence binder capture", (fun () -> accepted {|
+    (fn (run n u32) (value (snd (dpair
+      (sigma (x u32) (refine (y u32)
+        (eq y (if-proof u32 (u32-eq x n) (p x) (q n))))) 7
+      (pack (refine (y u32)
+        (eq y (if-proof u32 (u32-eq 7 n) (p 7) (q n))))
+        (if-proof u32 (u32-eq 7 n) (p 7) (q n))
+        (refl (if-proof u32 (u32-eq 7 n) (p 7) (q n)))))))) |});
+  "sigma stuck evidence wrong capture", (fun () -> kernel_rejects Type_mismatch {|
+    (fn (run n u32) (value (snd (dpair
+      (sigma (x u32) (refine (y u32)
+        (eq y (if-proof u32 (u32-eq x n) (p x) (q n))))) 7
+      (pack (refine (y u32)
+        (eq y (if-proof u32 (u32-eq 7 n) (p n) (q 7))))
+        (if-proof u32 (u32-eq 7 n) (p n) (q 7))
+        (refl (if-proof u32 (u32-eq 7 n) (p n) (q 7)))))))) |});
+  "sigma boolean index", (fun () -> accepted {|
+    (value (snd (dpair
+      (sigma (b bool) (refine (y u32) (eq y (if b 1 0)))) true
+      (pack (refine (y u32) (eq y 1)) 1 (refl 1))))) |});
+  "sigma family alpha conversion", (fun () -> accepted {|
+    (value (snd (ann (dpair
+      (sigma (x u32) (refine (y u32) (eq y x))) 7
+      (pack (refine (y u32) (eq y 7)) 7 (refl 7)))
+      (sigma (a u32) (refine (b u32) (eq b a)))))) |});
+  "sigma family normalization", (fun () -> accepted {|
+    (value (snd (ann (dpair
+      (sigma (x u32) (refine (y u32) (eq y (add x (add 1 2))))) 7
+      (pack (refine (y u32) (eq y 10)) 10 (refl 10)))
+      (sigma (a u32) (refine (b u32) (eq b (add a 3))))))) |});
+  "sigma outer index shadowing", (fun () -> accepted {|
+    (fn (run x u32)
+      (value (snd (dpair
+        (sigma (x (refine (v u32) (eq v x)))
+          (refine (v u32) (eq v (value x))))
+        (pack (refine (v u32) (eq v x)) x (refl x))
+        (pack (refine (v u32) (eq v x)) x (refl x)))))) |});
+  "sigma dependent application", (fun () -> accepted {|
+    (fn (run n u32)
+      (app run (fn (run p (sigma (x u32) (refine (y u32) (eq y x))))
+        (let (erase e (eq (value (snd p)) (fst p)))
+          (evidence (snd p)) (value (snd p))))
+        (dpair (sigma (x u32) (refine (y u32) (eq y x))) n
+          (pack (refine (y u32) (eq y n)) n (refl n))))) |});
+  "sigma runtime erasure", (fun () -> same_output {|
+    (fn (run n u32) (snd (dpair (sigma (x u32) u32)
+      (add n 1) (add n 2)))) |}
+    "(fn (run n u32) (snd (pair (add n 1) (add n 2))))");
+  "sigma refinement proof erasure", (fun () -> same_output {|
+    (fn (run n u32) (value (snd (dpair
+      (sigma (x u32) (refine (y u32) (eq y x))) n
+      (pack (refine (y u32) (eq y n)) n (refl n)))))) |}
+    "(fn (run n u32) (snd (pair n n)))");
+  "sigma inactive shape erasure", (fun () -> same_output {|
+    (case u32 (inr (sigma (x (product u32 bool))
+      (refine (y (product u32 u32)) (eq (fst y) (fst x)))) 7)
+      (p (fst (value (snd p)))) (n n)) |}
+    "(case u32 (inr (product (product u32 bool) (product u32 u32)) 7) (p (fst (snd p))) (n n))");
+  "sigma transport erasure", (fun () -> same_output {|
+    (fn (run n u32) (value (snd (transport
+      (i (sigma (x u32) (refine (y u32) (eq y (add x i)))))
+      1 1 (refl 1)
+      (dpair (sigma (x u32) (refine (y u32) (eq y (add x 1)))) n
+        (pack (refine (y u32) (eq y (add n 1)))
+          (add n 1) (refl (add n 1)))))))) |}
+    "(fn (run n u32) (snd (pair n (add n 1))))");
+  "sigma export rejected", (fun () -> kernel_rejects Unsupported_export
+    "(dpair (sigma (x u32) u32) 7 9)");
+  "sigma parameter export rejected", (fun () -> kernel_rejects Unsupported_export
+    "(fn (run p (sigma (x u32) u32)) (fst p))");
+  "sigma binder reserved", (fun () -> rejected
+    (Parse "binder name is reserved for literals")
+    "(fst (dpair (sigma (true u32) u32) 7 9))");
+  "sigma binder absent from domain", (fun () -> rejected (Unknown_name "x")
+    "(fn (run p (sigma (x (refine (v u32) (eq v x))) u32)) 0)");
+  "sigma binder absent from first term", (fun () -> rejected (Unknown_name "x")
+    "(fst (dpair (sigma (x u32) u32) x 9))");
+  "sigma binder absent from second term", (fun () -> rejected (Unknown_name "x")
+    "(fst (dpair (sigma (x u32) u32) 7 x))");
+  "sigma malformed constructor", (fun () -> rejected
+    (Parse "invalid term form") "(dpair (sigma (x u32) u32) 7)");
+  "sigma substitution binds only family", (fun () ->
+    let open Ast in
+    let ty = Sigma (Refine (U32, Eq (Var 0, Var 1)),
+      Refine (U32, Eq (Var 0, Add (Value (Var 1), Var 2)))) in
+    let replacement = Add (Var 0, Lit 1L) in
+    let* actual = subst_ty (Budget.create 1000) replacement ty in
+    let expected = Sigma (Refine (U32, Eq (Var 0, Add (Var 1, Lit 1L))),
+      Refine (U32, Eq (Var 0,
+        Add (Value (Var 1), Add (Var 2, Lit 1L))))) in
+    if actual = expected then Ok () else Error (Backend "sigma family capture"));
+  "sigma constructor has no binder", (fun () ->
+    let open Ast in
+    let annotation = Sigma (U32, Refine (U32, Eq (Var 0, Add (Var 1, Var 2)))) in
+    let body = DPair (annotation, Var 0, Var 1) in
+    let replacement = Add (Var 0, Lit 1L) in
+    let* actual = subst_term (Budget.create 1000) replacement body in
+    let expected = DPair (Sigma (U32,
+      Refine (U32, Eq (Var 0, Add (Var 1, Add (Var 2, Lit 1L))))),
+      replacement, Var 0) in
+    if actual = expected then Ok () else Error (Backend "dependent pair capture"));
   "backend negative local", (fun () ->
     backend_rejects (Invalid_index (-1)) (Erase.Local (-1)));
   "backend out-of-scope local", (fun () ->

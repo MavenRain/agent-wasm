@@ -27,7 +27,7 @@ let run budget checked =
     let* () = Budget.tick budget in
     match ty with
     | Ast.U32 | Ast.Bool -> Ok (Const 0L)
-    | Ast.Product (a, b) ->
+    | Ast.Product (a, b) | Ast.Sigma (a, b) ->
         let* a = zero a in
         let* b = zero b in
         Ok (Pair (a, b))
@@ -72,7 +72,7 @@ let run budget checked =
         let* b = walk (Some (depth + 1) :: scope) (depth + 2) b in
         Ok (Let (value, If (Fst (Local 0),
           Let (Fst (Snd (Local 0)), a), Let (Snd (Snd (Local 0)), b))))
-    | Ast.Pair (a, b) ->
+    | Ast.Pair (a, b) | Ast.DPair (_, a, b) ->
         let* a = walk scope depth a in
         let* b = walk scope depth b in
         Ok (Pair (a, b))

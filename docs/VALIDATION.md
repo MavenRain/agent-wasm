@@ -1,5 +1,70 @@
 # Compiler validation, 2026-09-06
 
+## M1 finite dependent pairs and validated budgets, 2026-09-06
+
+Implemented on base commit `e372ac6` in an isolated workspace checkout.
+
+```text
+opam exec -- dunecho build
+  OK build: 0 errors, 0 warnings
+_build/default/test/kernel_test.exe
+  kernel: 356 cases, 0 failures
+node scripts/e2e.mjs
+  e2e: 1585 programs, 3170 host executions, erasure and rejection checks passed
+bagrep obligations --include-tests --deny <absolute lib, bin, test paths>
+  no obligations at or above medium in 14 files
+git diff --check
+  clean
+```
+
+The 53 new kernel cases cover finite Sigma formation, annotated construction,
+dependent second projection, nested abstract evidence, ghost and runtime phases,
+malformed families before conversion, and inactive sum alternatives. They check
+both component scopes, outer-name shadowing, direct AST substitution under
+Sigma and refinement binders, and a stuck evidence conditional with an outer
+index. Closed projections reduce while open projections remain distinct.
+Product and Sigma types do not convert implicitly. Scalar exports, erased uses,
+bare proof fields, and function fields retain explicit rejection behavior.
+
+The fixed dependent conditional in `sigma_budget_source` compiles in exactly
+405 steps and rejects fuel 404. The actual validated-budget example compiles
+to 236 bytes in 1901 steps; fuel 1900 is rejected without changing an existing
+output. Its check-only count is 1750. The existing example compilation pins
+remain 366/365 for refined-increment, 468/467 for budget-sum, 1411/1410 for
+record-policy, and 501/500 for validated-ceiling. These boundaries were measured
+with the new binary, including output preservation on fuel exhaustion.
+
+The host suite adds 389 programs. The independent evaluator uses a tagged
+dependent pair with two eager components, separate from ordinary product
+arrays. Directed tests cover both projections, unsigned boundaries, nested
+Sigma/record/sum layouts, conditional and case results, closure arguments and
+repeated calls, erased outer captures, transport, and checked branch evidence.
+Thirty generated dependent programs augment the mixed generator. Seven pairs
+of product and Sigma programs have identical IR and Wasm, including nested
+inactive alternatives. Three Sigma fixtures execute at exactly 50,000 combined
+parameters and locals; their one-over counterparts are rejected. CLI malformed
+forms, invalid types and evidence, reserved binders, and erased uses preserve
+existing outputs and create no absent artifacts.
+
+The strengthened constructor-shadowing fixture runs across nine inputs in
+the full run. Its 18 host executions are part of the 3170 total.
+
+The actual validated-budget file runs for 216 combinations of spent, proposed,
+ceiling, and field selector. An independent oracle uses exact JavaScript
+addition to distinguish overflow, an exceeded ceiling, and successful totals.
+This covers accepted zero separately from failure through the status selector,
+the signed boundary, maximum u32, and a wrapped total that fits the ceiling.
+
+Eight targeted mutations in a separate scratch tree all compiled and were
+rejected by semantic kernel regressions: wrong Sigma family depth, a phantom
+constructor binder, wrong construction substitution, wrong second-projection
+substitution, checking either component in Ghost, skipping family formation,
+and dropping the second inactive zero-fill shape. None relied only on the
+fixed fuel assertion. Independent core and documentation reviews found no
+concrete correctness defect. No benchmark was refreshed or mechanized
+preservation claim added. The dependent data representation remains finite
+and internal, and the public ABI remains integers.
+
 ## M1 named records, 2026-09-06
 
 Implemented over `a754ce3` plus the staged checked-branch-evidence slice, in an

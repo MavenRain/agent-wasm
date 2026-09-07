@@ -20,25 +20,22 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: add general dependent pairs and compose the checked branch evidence
-into validators with explicit overflow errors. Validation can
-now yield either an error or a value with erased evidence. Domain example:
-a proposed tool action checked against an explicit immutable allowlist and price
-ceiling.
-Amounts need non-wrapping arithmetic or explicit overflow errors.
+Next: specify evaluation and typing rules and establish the substitution and
+erasure obligations for the finite fragment. Extend the validation corpus to
+compose immutable tool policy with budget checks, preserving explicit errors
+and checked evidence. Named error variants and a reusable surface for these
+contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
 including nested products and internal function fields. Static expansion retains
 both fields' runtime computations without introducing an object ABI. The
 tool-policy example packages a proposed action and checks immutable tool IDs
-and a price ceiling, returning an integer decision. Evidence-bearing validation
-and named records remain open.
+and a price ceiling, returning an integer decision.
 
 Implemented third slice: boolean-valued conditionals compose scalar predicates.
 The budget-policy example detects u32 addition overflow before checking a ceiling,
 so wrapping cannot turn an excessive proposal into an accepted one. It returns
-an integer decision; distinct overflow errors and evidence-bearing results remain
-open.
+an integer decision.
 
 Implemented fourth slice: explicit equality transport over u32-indexed type
 families. Endpoints and equality evidence are checked in the ghost phase; the
@@ -47,7 +44,7 @@ value because type indices cannot change runtime representation in this
 fragment. Abstract symmetry and transitivity are expressible. Reflexive
 transport reduces during conversion; transport with an open proof stays
 symbolic. The symmetry example emits the same module as plain increment.
-This does not yet connect executable comparisons to refined evidence.
+Transport itself consumes existing equality evidence.
 
 Implemented fifth slice: conditionals return nested products of scalar fields.
 The budget-result example returns an internal status/payload pair, distinguishing
@@ -59,7 +56,6 @@ handlers. Payloads and case results support nested scalar products and sums.
 The budget-sum example distinguishes error codes from successful totals using
 the type system, then adapts its result to the integer ABI. Lowering reuses
 products and executable conditionals with a tag and inactive payload storage.
-Named records and evidence about successful policy comparisons remain open.
 
 Implemented seventh slice: refined values pair a finite runtime payload with
 an erased dependent equality proof. Explicit pack, value, and evidence forms
@@ -67,24 +63,35 @@ check construction and projection without introducing runtime wrappers.
 Refinements compose inside products, sums, conditionals, and case results;
 all indexed families are checked before erasure. The refined-increment example
 carries evidence of its modular result and emits the same IR and Wasm as the
-equivalent plain program. General dependent pairs and comparison-produced
-evidence remain open; an ordinary conditional does not refine its branches.
+equivalent plain program. An ordinary conditional does not refine its branches.
 
 Implemented eighth slice: `if-proof` binds erased evidence in each executable
 branch. The evidence states that the condition's u32 indicator equals 1 or 0,
 using the existing equality type. An explicit finite result type prevents the
 branch binder from escaping. The validated-ceiling example returns an internal
 error/refined-value sum and adapts it to the integer ABI. Its successful payload
-carries evidence that it meets the supplied ceiling. Arithmetic still wraps;
-overflow validation and immutable policy composition remain explicit work.
+carries evidence that it meets the supplied ceiling. Arithmetic still wraps.
 
 Implemented ninth slice: internal named records with eager field construction
 and checked projection. Ordered, structural record types contain finite payloads
 and compose with refinements, sums, and checked branches. Field names do not
 bind indices or survive in Wasm. The record-policy example checks an immutable
 tool allowlist and price ceiling, returning an error or a refined named action
-before adapting to the scalar ABI. General dependent pairs and explicit
-overflow-aware arithmetic remain open.
+before adapting to the scalar ABI.
+
+Implemented tenth slice: finite dependent pairs with `(sigma (x A) B)` and
+annotated `dpair` construction. Both components survive as an ordinary runtime
+pair; the second component's type may refer to the first through erased
+evidence indices. Dependent projection, substitution, conversion, and formation
+compose with the existing finite data forms. Function-bearing pairs with
+dependent types, explicitly erased Sigma components, and type-level shape
+selection remain outside this slice.
+
+The validated-budget example combines false-branch overflow evidence with
+true-branch ceiling evidence in nested refinements. Its successful dependent
+pair retains the starting balance and accepted total; its error sum
+distinguishes overflow from exceeding the ceiling. The integer adapter exposes
+status or payload. Arithmetic remains modular, with explicit overflow rejection.
 
 Write small-step or evaluation semantics, typing rules, and an erasure relation.
 Establish substitution, preservation, and erasure simulation for the supported

@@ -67,8 +67,18 @@ function interpret(tree, env = new Map()) {
       return packageValue.proof;
     }
     case 'pair': return [interpret(tree[1], env), interpret(tree[2], env)];
-    case 'fst': return interpret(tree[1], env)[0];
-    case 'snd': return interpret(tree[1], env)[1];
+    case 'dpair': return { kind: 'dependent-pair',
+      first: interpret(tree[2], env), second: interpret(tree[3], env) };
+    case 'fst':
+    case 'snd': {
+      const pair = interpret(tree[1], env);
+      if (Array.isArray(pair)) {
+        assert.equal(pair.length, 2, 'reference: malformed product');
+        return pair[tree[0] === 'fst' ? 0 : 1];
+      }
+      assert.equal(pair?.kind, 'dependent-pair', 'reference: projection requires a pair');
+      return tree[0] === 'fst' ? pair.first : pair.second;
+    }
     case 'u32-eq': return interpret(tree[1], env) === interpret(tree[2], env);
     case 'u32-lt': return interpret(tree[1], env) < interpret(tree[2], env);
     case 'u32-le': return interpret(tree[1], env) <= interpret(tree[2], env);
@@ -95,10 +105,15 @@ const random = (n) => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; re
 let fresh = 0;
 const refinedU32 = ['refine', ['item', 'u32'], ['eq', 'item', 'item']];
 const packU32 = (value) => ['pack', refinedU32, value, ['refl', value]];
+const nextFamily = (value) => ['refine', ['item', 'u32'], ['eq', 'item', ['add', value, 1]]];
+const sigmaNext = ['sigma', ['base', 'u32'], nextFamily('base')];
+const dpairNext = (value) => ['dpair', sigmaNext, value,
+  ['pack', nextFamily(value), ['add', value, 1], ['refl', ['add', value, 1]]]];
+const sigmaScalars = ['sigma', ['first', 'u32'], 'u32'];
 function generate(depth, names) {
   if (depth === 0) return random(2) ? names[random(names.length)] : random(0x100000000);
   const name = `v${fresh++}`;
-  switch (random(15)) {
+  switch (random(17)) {
     case 0: return ['add', generate(depth - 1, names), generate(depth - 1, names)];
     case 1: return ['let', ['run', name, 'u32'], generate(depth - 1, names), generate(depth - 1, [...names, name])];
     case 2: {
@@ -143,11 +158,102 @@ function generate(depth, names) {
       ['inl', 'u32', ['record', ['amount', generate(depth - 1, names)]]],
       ['inr', ['record', ['amount', 'u32']], generate(depth - 1, names)]],
       [name, ['field', name, 'amount']], [name, name]];
+    case 15: {
+      const pair = dpairNext(generate(depth - 1, names));
+      return random(2) ? ['fst', pair] : ['value', ['snd', pair]];
+    }
+    case 16: return ['let', ['run', name, sigmaNext],
+      ['if', ['u32-lt', generate(depth - 1, names), 0x80000000],
+        dpairNext(generate(depth - 1, names)), dpairNext(generate(depth - 1, names))],
+      ['add', ['fst', name], ['value', ['snd', name]]]];
     default: throw new Error('random generator out of range');
   }
 }
 
 const cases = [];
+for (const x of [0, 1, 99, 100, 101, 0x7fffffff, 0x80000000, 0xfffffffe, 0xffffffff]) {
+  const consume = (pair) => ['add', ['fst', pair], ['value', ['snd', pair]]];
+  const first = dpairNext('x');
+  const second = dpairNext(['add', 'x', 7]);
+  for (const projection of ['fst', 'snd']) {
+    const project = (pair) => projection === 'fst' ? ['fst', pair] : ['value', ['snd', pair]];
+    cases.push({ name: `sigma-${projection}-state-${x}`, args: [x], body:
+      ['fn', ['run', 'x', 'u32'], ['let', ['run', 'p', sigmaNext], first,
+        ['add', project('p'), ['add', consume('p'), ['add', 'x', 11]]]]] });
+    cases.push({ name: `sigma-${projection}-if-${x}`, args: [x], body:
+      ['fn', ['run', 'x', 'u32'], project(['if', ['u32-lt', 'x', 100], first, second])] });
+  }
+  cases.push({ name: `sigma-evidence-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'p', sigmaNext], first,
+      ['let', ['erase', 'proof', ['eq', ['value', ['snd', 'p']], ['add', ['fst', 'p'], 1]]],
+        ['evidence', ['snd', 'p']], consume('p')]]] });
+  const shadowed = ['sigma', ['x', 'u32'], nextFamily('x')];
+  const shifted = ['add', 'x', 7];
+  cases.push({ name: `sigma-constructor-outer-scope-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['value', ['snd', ['dpair', shadowed, shifted,
+      ['pack', nextFamily(shifted), ['add', shifted, 1], ['refl', ['add', shifted, 1]]]]]]] });
+  cases.push({ name: `sigma-case-result-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'p', sigmaNext],
+      ['case', sigmaNext, ['if', ['u32-lt', 'x', 100], ['inl', 'u32', 'x'], ['inr', 'u32', ['add', 'x', 7]]],
+        ['left', dpairNext('left')], ['right', dpairNext('right')]], consume('p')]] });
+  cases.push({ name: `sigma-sum-alternatives-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['case', 'u32', ['if', ['u32-lt', 'x', 100],
+      ['inl', ['record', ['amount', 'u32']], first],
+      ['inr', sigmaNext, ['record', ['amount', ['add', 'x', 9]]]]],
+      ['p', consume('p')], ['r', ['field', 'r', 'amount']]]] });
+  cases.push({ name: `sigma-closure-capture-argument-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'captured', sigmaNext], first,
+      ['let', ['run', 'f', ['pi', ['run', 'p', sigmaNext], 'u32']],
+        ['fn', ['run', 'p', sigmaNext], ['add', consume('captured'), consume('p')]],
+        ['add', ['app', 'run', 'f', second], ['app', 'run', 'f', first]]]]] });
+  cases.push({ name: `sigma-closure-result-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'f', ['pi', ['run', 'n', 'u32'], sigmaNext]],
+      ['fn', ['run', 'n', 'u32'], dpairNext(['add', 'x', 'n'])],
+      ['let', ['run', 'p', sigmaNext], ['app', 'run', 'f', 7], consume('p')]]] });
+  const nested = ['sigma', ['p', sigmaNext],
+    ['record', ['copy', ['refine', ['n', 'u32'], ['eq', 'n', ['fst', 'p']]]],
+      ['choice', ['sum', sigmaNext, ['product', 'bool', 'u32']]]]];
+  const copy = ['refine', ['n', 'u32'], ['eq', 'n', 'x']];
+  const nestedValue = ['dpair', nested, first, ['record',
+    ['copy', ['pack', copy, 'x', ['refl', 'x']]],
+    ['choice', ['if', ['u32-lt', 'x', 100], ['inl', ['product', 'bool', 'u32'], second],
+      ['inr', sigmaNext, ['pair', ['u32-eq', 'x', 100], ['add', 'x', 13]]]]]]];
+  cases.push({ name: `sigma-nested-record-sum-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'p', nested], nestedValue,
+      ['add', consume(['fst', 'p']), ['add', ['value', ['field', ['snd', 'p'], 'copy']],
+        ['case', 'u32', ['field', ['snd', 'p'], 'choice'], ['q', consume('q')],
+          ['q', ['if', ['fst', 'q'], ['snd', 'q'], ['add', ['snd', 'q'], 'x']]]]]]]] });
+  const erasedFamily = ['sigma', ['base', 'u32'],
+    ['refine', ['item', 'u32'], ['eq', ['add', 'index', 'base'], ['add', 'index', 'base']]]];
+  const erasedPayload = ['refine', ['item', 'u32'],
+    ['eq', ['add', 'index', 'payload'], ['add', 'index', 'payload']]];
+  cases.push({ name: `sigma-erased-outer-capture-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['app', 'run', ['app', 'erase',
+      ['fn', ['erase', 'index', 'u32'], ['fn', ['run', 'payload', 'u32'],
+        ['let', ['erase', 'proof', ['eq', ['add', 'index', 'payload'], ['add', 'index', 'payload']]],
+          ['refl', ['add', 'index', 'payload']], ['value', ['snd', ['dpair', erasedFamily, 'payload',
+            ['pack', erasedPayload, ['add', 'payload', 1], 'proof']]]]]]], 'x'], ['add', 'x', 3]]] });
+  const condition = ['u32-le', 'x', 100];
+  const indicator = ['if', condition, 1, 0];
+  const branchFamily = ['sigma', ['bit', 'u32'],
+    ['refine', ['item', 'u32'], ['eq', indicator, 'bit']]];
+  cases.push({ name: `sigma-if-proof-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['let', ['run', 'p', branchFamily],
+      ['if-proof', branchFamily, condition,
+        ['yes', ['dpair', branchFamily, 1, ['pack', ['refine', ['item', 'u32'], ['eq', indicator, 1]],
+          ['add', 'x', 1], 'yes']]],
+        ['no', ['dpair', branchFamily, 0, ['pack', ['refine', ['item', 'u32'], ['eq', indicator, 0]],
+          ['add', 'x', 7], 'no']]]],
+      ['add', ['fst', 'p'], ['value', ['snd', 'p']]]]] });
+  const transportedFamily = (index) => ['sigma', ['base', 'u32'],
+    ['refine', ['item', 'u32'], ['eq', 'item', ['add', 'base', index]]]];
+  const transportedPayload = ['refine', ['item', 'u32'], ['eq', 'item', ['add', 'x', 'x']]];
+  const transportedPair = ['transport', ['index', transportedFamily('index')],
+    'x', 'x', ['refl', 'x'], ['dpair', transportedFamily('x'), 'x',
+      ['pack', transportedPayload, ['add', 'x', 'x'], ['refl', ['add', 'x', 'x']]]]];
+  cases.push({ name: `sigma-transport-family-${x}`, args: [x], body:
+    ['fn', ['run', 'x', 'u32'], ['value', ['snd', transportedPair]]] });
+}
 for (const tool of [0, 7, 8, 9, 0x7fffffff, 0x80000000, 0xffffffff]) {
   for (const price of [0, 1, 99, 100, 101, 0x80000000, 0xffffffff]) {
     cases.push({ name: `record-policy-${tool}-${price}`, file: 'examples/record-policy.aw',
@@ -357,6 +463,9 @@ for (const spent of [0, 1, 99, 0x7fffffff, 0x80000000, 0xffffffff]) {
         cases.push({ name: `budget-sum-${spent}-${proposed}-${ceiling}-${field}`,
           file: 'examples/budget-sum.aw', args: [spent, proposed, ceiling, field],
           expected: field === 0 ? status : status === 0 ? total : 0 });
+        cases.push({ name: `validated-budget-${spent}-${proposed}-${ceiling}-${field}`,
+          file: 'examples/validated-budget.aw', args: [spent, proposed, ceiling, field],
+          expected: field === 0 ? status : status === 0 ? total : 0 });
       }
     }
   }
@@ -493,6 +602,43 @@ for (let i = 0; i < 30; i++) {
       ['yes', ['value', ['pack', family, generate(3, ['input']), 'yes']]],
       ['no', generate(3, ['input'])]]] });
 }
+for (let i = 0; i < 30; i++) {
+  const value = generate(3, ['input']);
+  cases.push({ name: `generated-sigma-${i}`, args: [random(0x100000000)], body:
+    ['fn', ['run', 'input', 'u32'], ['let', ['run', 'p', sigmaNext], dpairNext(value),
+      ['let', ['erase', 'proof', ['eq', ['value', ['snd', 'p']], ['add', ['fst', 'p'], 1]]],
+        ['evidence', ['snd', 'p']], ['add', ['fst', 'p'], ['value', ['snd', 'p']]]]]] });
+}
+// These program pairs exercise the same finite layout with and without a family.
+// Both source forms also run through the independent reference evaluator.
+for (const dependent of [false, true]) {
+  const ty = dependent ? sigmaNext : ['product', 'u32', 'u32'];
+  const pair = dependent ? dpairNext : (value) => ['pair', value, ['add', value, 1]];
+  const consume = (value) => ['add', ['fst', value],
+    dependent ? ['value', ['snd', value]] : ['snd', value]];
+  const bodies = {
+    direct: ['let', ['run', 'p', ty], pair(['add', 'x', 7]), consume('p')],
+    conditional: ['let', ['run', 'p', ty], ['if', ['u32-lt', 'x', 100],
+      pair('x'), pair(['add', 'x', 7])], consume('p')],
+    case: ['let', ['run', 'p', ty], ['case', ty, ['inr', 'u32', 'x'],
+      ['n', pair('n')], ['n', pair(['add', 'n', 7])]], consume('p')],
+    closure: ['let', ['run', 'f', ['pi', ['run', 'p', ty], 'u32']],
+      ['fn', ['run', 'p', ty], consume('p')],
+      ['add', ['app', 'run', 'f', pair('x')], ['app', 'run', 'f', pair(['add', 'x', 7])]]],
+    'inactive-right': ['case', 'u32', ['inl', ty, 'x'], ['n', 'n'], ['p', consume('p')]],
+    'inactive-left': ['case', 'u32', ['inr', ty, 'x'], ['p', consume('p')], ['n', 'n']],
+  };
+  const nestedTy = dependent
+    ? ['sigma', ['p', ty], ['record', ['choice', ['sum', 'bool', ty]], ['extra', 'u32']]]
+    : ['product', ty, ['record', ['choice', ['sum', 'bool', ty]], ['extra', 'u32']]];
+  bodies['inactive-nested'] = ['case', 'u32', ['inl', nestedTy, 'x'], ['n', 'n'],
+    ['p', consume(['fst', 'p'])]];
+  for (const [name, body] of Object.entries(bodies)) {
+    cases.push({ name: `${dependent ? 'sigma' : 'product'}-erasure-${name}`,
+      body: ['fn', ['run', 'x', 'u32'], body], args: [0xffffffff],
+      ...(dependent ? { sameWasm: `product-erasure-${name}`, sameIR: `product-erasure-${name}` } : {}) });
+  }
+}
 let wide = 'x';
 for (let i = 0; i < 80; i++) wide = ['add', wide, i];
 cases.push({ name: 'large-sections', body: ['fn', ['run', 'x', 'u32'], wide], args: [13] });
@@ -546,6 +692,15 @@ cases.push({ name: 'branch-local-limit', body: ['if', ['u32-lt', 1, 2],
 cases.push({ name: 'product-branch-local-limit', body: ['snd', ['if', 'false',
   ['pair', additions(24998, 1), 7], ['pair', 11, additions(24999, 2)]]],
   args: [], fuel: '100000000' });
+cases.push({ name: 'sigma-local-limit-unselected', body:
+  ['fst', ['dpair', sigmaScalars, 42, additions(50000, 1)]],
+  args: [], fuel: '100000000' });
+cases.push({ name: 'sigma-local-limit-both-with-parameter', body:
+  ['fn', ['run', 'x', 'u32'], ['snd', ['dpair', sigmaScalars,
+    additions(24999, 'x'), additions(25000, 2)]]], args: [7], fuel: '100000000' });
+cases.push({ name: 'sigma-branch-local-limit', body: ['snd', ['if', 'false',
+  ['dpair', sigmaScalars, additions(24998, 1), 7],
+  ['dpair', sigmaScalars, 11, additions(24999, 2)]]], args: [], fuel: '100000000' });
 
 // Nesting an if-proof in the opposite branch over the same condition puts
 // both evidence polarities in scope, so the inner arm may forge a refined
@@ -585,7 +740,12 @@ try {
     const bytes = readFileSync(output);
     if (test.sameWasm) {
       assert(bytes.equals(readFileSync(join(scratch, `${test.sameWasm}.wasm`))),
-        `${test.name}: refinement wrappers altered Wasm bytes`);
+        `${test.name}: erased wrappers altered Wasm bytes`);
+    }
+    if (test.sameIR) {
+      assert.equal(run(compiler, ['ir', input]),
+        run(compiler, ['ir', join(scratch, `${test.sameIR}.aw`)]),
+        `${test.name}: erased wrappers altered runtime IR`);
     }
     assert(WebAssembly.validate(bytes), `${test.name}: invalid binary`);
     const module = new WebAssembly.Module(bytes);
@@ -744,6 +904,61 @@ try {
     assert(!existsSync(absent));
   }
   const invalidFamily = ['refine', ['item', 'u32'], ['eq', 'true', 'true']];
+  const invalidType = 'parse: expected u32, bool, product, sigma, record, sum, refine, eq, or pi type';
+  const sigmaRejections = [
+    ['annotation', ['fst', ['dpair', ['product', 'u32', 'u32'], 7, 9]], mismatch],
+    ['arity-short', ['fst', ['dpair', sigmaScalars, 7]], 'parse: invalid term form'],
+    ['arity-long', ['fst', ['dpair', sigmaScalars, 7, 9, 11]], 'parse: invalid term form'],
+    ['binder-arity', ['fst', ['dpair', ['sigma', ['run', 'x', 'u32'], 'u32'], 7, 9]], invalidType],
+    ['family-arity', ['fst', ['dpair', ['sigma', ['x', 'u32']], 7, 9]], invalidType],
+    ['domain-scope', ['fst', ['dpair', ['sigma', ['base',
+      ['refine', ['n', 'u32'], ['eq', 'n', 'base']]], 'u32'], packU32(7), 9]], 'unknown name: base'],
+    ['first-scope', ['fst', ['dpair', sigmaNext, 'base', packU32(9)]], 'unknown name: base'],
+    ['second-scope', ['fst', ['dpair', sigmaNext, 7, 'base']], 'unknown name: base'],
+    ['bad-family', ['fst', ['dpair', ['sigma', ['base', 'u32'], invalidFamily], 7, packU32(9)]], mismatch],
+    ['bad-first', ['fst', ['dpair', sigmaScalars, 'true', 9]], mismatch],
+    ['bad-second', ['fst', ['dpair', sigmaScalars, 7, 'true']], mismatch],
+    ['wrong-index', ['fst', ['dpair', sigmaNext, 7,
+      ['pack', nextFamily(8), 9, ['refl', 9]]]], mismatch],
+    ['wrong-proof', ['fst', ['dpair', sigmaNext, 7,
+      ['pack', nextFamily(7), 8, ['refl', 9]]]], mismatch],
+    ['false-proof', ['fst', ['dpair', sigmaNext, 7,
+      ['pack', nextFamily(7), 9, ['refl', 9]]]], mismatch],
+    ['product-as-sigma', ['let', ['run', 'p', sigmaScalars], ['pair', 7, 9], ['fst', 'p']], mismatch],
+    ['sigma-as-product', ['let', ['run', 'p', ['product', 'u32', 'u32']],
+      ['dpair', sigmaScalars, 7, 9], ['fst', 'p']], mismatch],
+    ['branch-kind', ['fst', ['if', 'true', ['dpair', sigmaScalars, 7, 9], ['pair', 7, 9]]], mismatch],
+    ['proof-domain', ['fst', ['dpair', ['sigma', ['p', ['eq', 7, 7]], 'u32'], ['refl', 7], 9]], mismatch],
+    ['proof-family', ['fst', ['dpair', ['sigma', ['base', 'u32'], ['eq', 'base', 'base']], 7, ['refl', 7]]], mismatch],
+    ['function-domain', ['snd', ['dpair', ['sigma', ['f', ['pi', ['run', 'x', 'u32'], 'u32']], 'u32'],
+      ['fn', ['run', 'x', 'u32'], 'x'], 9]], mismatch],
+    ['function-family', ['fst', ['dpair', ['sigma', ['base', 'u32'], ['pi', ['run', 'x', 'u32'], 'u32']],
+      7, ['fn', ['run', 'x', 'u32'], 'x']]], mismatch],
+    ['nested-proof', ['fn', ['run', 'p', ['sigma', ['base', 'u32'],
+      ['record', ['proof', ['eq', 'base', 'base']]]]], 0], mismatch],
+    ['inactive-family', ['case', 'u32', ['inl', ['sigma', ['base', 'u32'], invalidFamily], 7],
+      ['n', 'n'], ['p', 0]], mismatch],
+    ['erased-first', ['let', ['erase', 'n', 'u32'], 7,
+      ['snd', ['dpair', sigmaScalars, 'n', 9]]], erasedUse],
+    ['erased-second', ['let', ['erase', 'n', 'u32'], 7,
+      ['fst', ['dpair', sigmaScalars, 9, 'n']]], erasedUse],
+    ['erased-pair', ['let', ['erase', 'p', sigmaNext], dpairNext(7), ['fst', 'p']], erasedUse],
+    ['runtime-evidence', ['evidence', ['snd', dpairNext(7)]],
+      'equality evidence may only occur in erased positions'],
+    ['export-result', dpairNext(7), badExport],
+    ['export-argument', ['fn', ['run', 'p', sigmaNext], ['fst', 'p']], badExport],
+  ];
+  for (const [name, body, reason] of sigmaRejections) {
+    const input = join(scratch, `reject-sigma-${name}.aw`);
+    const absent = join(scratch, `reject-sigma-${name}.wasm`);
+    writeFileSync(input, source(['export', 'main', body]));
+    writeFileSync(output, 'existing artifact');
+    for (const target of [output, absent]) {
+      rejects(() => run(compiler, ['compile', input, target]), reason, `sigma ${name}`);
+    }
+    assert.equal(readFileSync(output, 'utf8'), 'existing artifact', `sigma ${name}: replaced artifact`);
+    assert(!existsSync(absent), `sigma ${name}: emitted artifact`);
+  }
   const refinementRejections = [
     { name: 'false-proof', body: ['value', ['pack', ['refine', ['item', 'u32'], ['eq', 'item', 0]], 1, ['refl', 1]]] },
     { name: 'wrong-proof', body: ['value', ['pack', refinedU32, 1, ['refl', 2]]] },
@@ -811,6 +1026,7 @@ try {
         ['let', ['erase', name, 'u32'], 1, 42],
         ['transport', [name, 'u32'], 0, 0, ['refl', 0], 42],
         ['value', ['pack', ['refine', [name, 'u32'], ['eq', 7, 7]], 7, ['refl', 7]]],
+        ['fst', ['dpair', ['sigma', [name, 'u32'], 'u32'], 7, 9]],
         ['case', 'u32', ['inl', 'u32', 7], [name, 0], ['y', 'y']],
         ['case', 'u32', ['inl', 'u32', 7], ['x', 'x'], [name, 0]],
         ['fn', ['run', 'f', ['pi', ['run', name, 'u32'], 'u32']], ['app', 'run', 'f', 42]],
@@ -843,6 +1059,11 @@ try {
       ['pair', 11, additions(24999, 2)]]],
     ['fst', ['pair', 42, additions(50001, 1)]],
     ['snd', ['pair', additions(25000, 1), additions(25001, 2)]],
+    ['fst', ['dpair', sigmaScalars, 42, additions(50001, 1)]],
+    ['fn', ['run', 'x', 'u32'], ['snd', ['dpair', sigmaScalars,
+      additions(25000, 'x'), additions(25000, 2)]]],
+    ['snd', ['if', 'false', ['dpair', sigmaScalars, additions(24999, 1), 7],
+      ['dpair', sigmaScalars, 11, additions(24999, 2)]]],
     ['field', ['record', ['selected', 42], ['after', additions(50001, 1)]], 'selected'],
     ['field', ['record', ['before', additions(25000, 1)], ['selected', 42],
       ['after', additions(25001, 2)]], 'selected'],

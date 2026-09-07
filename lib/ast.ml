@@ -6,6 +6,8 @@ type ty =
   | U32
   | Bool
   | Product of ty * ty
+  (* Only the second component binds the erased first-component index. *)
+  | Sigma of ty * ty
   | Record of (string * ty) list
   | Sum of ty * ty
   (* Only the evidence family binds the erased payload. *)
@@ -22,6 +24,8 @@ and term =
   | IfProof of ty * term * term * term
   | Add of term * term
   | Pair of term * term
+  (* The annotation is a complete dependent pair type; neither term binds. *)
+  | DPair of ty * term * term
   | RecordValue of (string * term) list
   | Field of term * string
   | Fst of term
@@ -86,6 +90,11 @@ let rec map_term budget variable depth term =
       let* a = map_term budget variable depth a in
       let* b = map_term budget variable depth b in
       Ok (Pair (a, b))
+  | DPair (ty, a, b) ->
+      let* ty = map_ty budget variable depth ty in
+      let* a = map_term budget variable depth a in
+      let* b = map_term budget variable depth b in
+      Ok (DPair (ty, a, b))
   | RecordValue fields ->
       let* fields = map_fields budget (map_term budget variable depth) fields in
       Ok (RecordValue fields)
@@ -158,6 +167,10 @@ and map_ty budget variable depth ty =
       let* a = map_ty budget variable depth a in
       let* b = map_ty budget variable depth b in
       Ok (Product (a, b))
+  | Sigma (a, b) ->
+      let* a = map_ty budget variable depth a in
+      let* b = map_ty budget variable (depth + 1) b in
+      Ok (Sigma (a, b))
   | Record fields ->
       let* fields = map_fields budget (map_ty budget variable depth) fields in
       Ok (Record fields)

@@ -114,6 +114,11 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget names b in
       Ok (Product (a, b))
+  | List [Atom "sigma"; List [Atom name; a]; b] ->
+      let* () = binder name in
+      let* a = ty budget names a in
+      let* b = ty budget (name :: names) b in
+      Ok (Sigma (a, b))
   | List [Atom "refine"; List [Atom name; a]; proof] ->
       let* () = binder name in
       let* a = ty budget names a in
@@ -129,7 +134,7 @@ let rec ty budget names tree =
       let* a = ty budget names a in
       let* b = ty budget (name :: names) b in
       Ok (Pi (r, a, b))
-  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, record, sum, refine, eq, or pi type")
+  | Atom _ | List _ -> Error (Parse "expected u32, bool, product, sigma, record, sum, refine, eq, or pi type")
 and term budget names tree =
   let* () = Budget.tick budget in
   match tree with
@@ -164,6 +169,11 @@ and term budget names tree =
       let* a = term budget names a in
       let* b = term budget names b in
       Ok (Pair (a, b))
+  | List [Atom "dpair"; annotation; a; b] ->
+      let* annotation = ty budget names annotation in
+      let* a = term budget names a in
+      let* b = term budget names b in
+      Ok (DPair (annotation, a, b))
   | List [Atom "fst"; a] -> Result.map (fun a -> Fst a) (term budget names a)
   | List [Atom "snd"; a] -> Result.map (fun a -> Snd a) (term budget names a)
   | List [Atom "pack"; annotation; value; proof] ->

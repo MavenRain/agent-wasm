@@ -7,11 +7,12 @@ constrained agents, and durable tool and payment workflows.
 
 The first executable milestone is a pure compiler foundation. It supports u32
 arithmetic, booleans, unsigned comparisons, conditional branches, pairs, sums,
-case analysis, refined values with erased evidence, dependent function types,
-erased arguments, equality evidence, and equality transport.
-It does not yet implement agent APIs, effects, ownership, evidence-bearing validators,
-cryptography, or persistence. Proof checking and erasure are tested, not formally
-proved. OCaml-speed compilation remains a project acceptance requirement.
+case analysis, named records, finite dependent pairs, refined values with erased
+evidence, checked branches, dependent function types, erased arguments, equality
+evidence, and equality transport. It does not yet implement agent APIs, effects,
+ownership, cryptography, or persistence. Proof checking and erasure are tested,
+not formally proved. OCaml-speed compilation remains a project acceptance
+requirement.
 
 ## Run
 
@@ -77,8 +78,8 @@ node scripts/run.mjs artifacts/price-ceiling.wasm 101
 ```
 
 Comparisons produce internal booleans and `if` selects matching u32, bool,
-or nested product, sum, and refined-value branches. Proving that an executable
-validator's acceptance condition succeeded remains on the M1 roadmap.
+or nested product, record, sum, refinement, and dependent-pair branches.
+`if-proof` additionally introduces checked evidence of the branch decision.
 
 This slice adds `(product A B)`, `(pair a b)`, `fst`, and `snd` for internal
 data. `examples/tool-policy.aw` packages a tool ID and price, then checks IDs 7
@@ -162,8 +163,8 @@ node scripts/run.mjs artifacts/refined.wasm 41
 ```
 
 This example proves its payload equals the modular increment expression.
-Comparisons still do not introduce branch proofs, so it does not establish
-overflow freedom or successful policy checks.
+It does not establish overflow freedom or successful policy checks. Those
+require explicit `if-proof` branches, as shown below.
 
 Equality transport rewrites a type family using checked evidence:
 `(transport (index FAMILY) from to proof value)` takes a value of `FAMILY[from]`
@@ -228,6 +229,42 @@ wasmtime run --invoke main /tmp/policy.wasm 7 75
 ```
 
 This returns 76; tool 8 or a price of 101 returns 0.
+
+## Dependent pairs and validated budgets
+
+`(sigma (x A) B)` lets the second component's type refer to the first.
+Construct it with an explicit annotation and project with `fst` and `snd`:
+
+```lisp
+(dpair (sigma (x u32) (refine (y u32) (eq y (add x 1))))
+  41
+  (pack (refine (y u32) (eq y 42)) 42 (refl 42)))
+```
+
+The second component carries evidence about the first, even when the package
+is passed to an internal function. Both components remain at runtime; their
+types and refinement proofs erase. Finite dependent pairs lower to ordinary
+pairs and compose with records, sums, and executable branches.
+
+`examples/validated-budget.aw` accepts spent, proposed, ceiling, and a field
+selector. It returns an internal error or a dependent pair containing spent
+and the total, with separate erased evidence for no overflow and the ceiling
+check. Field 0 returns status: 0 success, 1 overflow, or 2 above the ceiling.
+Any other field returns the successful total, or zero on error.
+
+```sh
+_build/default/bin/main.exe compile examples/validated-budget.aw \
+  /tmp/budget.wasm
+node scripts/run.mjs /tmp/budget.wasm 60 40 100 1
+# 100
+node scripts/run.mjs /tmp/budget.wasm 4294967295 1 100 0
+# 1
+node scripts/run.mjs /tmp/budget.wasm 60 41 100 0
+# 2
+```
+
+An accepted zero reports status 0, so callers can distinguish it from failure.
+The scalar export ABI and modular `add` operation are unchanged.
 
 ## Validate
 

@@ -29,7 +29,7 @@ let rec lookup_field budget name = function
 
 let literal = function
   | Lit n -> Some n
-  | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> None
+  | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _ | Var _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> None
 
 let rec normal budget term =
   let* () = Budget.tick budget in
@@ -48,7 +48,7 @@ let rec normal budget term =
       (match value with
        | Inl (_, value) -> let* body = subst_term budget value a in normal budget body
        | Inr (_, value) -> let* body = subst_term budget value b in normal budget body
-       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Var _ | Lit _ | Boolean _ | Pair _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _
+       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Var _ | Lit _ | Boolean _ | Pair _ | DPair _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _
        | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ | Case _ ->
            let* ty = normal_ty budget ty in
            let* a = normal budget a in
@@ -58,6 +58,11 @@ let rec normal budget term =
       let* a = normal budget a in
       let* b = normal budget b in
       Ok (Pair (a, b))
+  | DPair (ty, a, b) ->
+      let* ty = normal_ty budget ty in
+      let* a = normal budget a in
+      let* b = normal budget b in
+      Ok (DPair (ty, a, b))
   | RecordValue fields ->
       let* fields = map_fields budget (normal budget) fields in
       Ok (RecordValue fields)
@@ -66,18 +71,18 @@ let rec normal budget term =
       (match value with
        | RecordValue fields -> lookup_field budget name fields
        | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _
-       | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _
+       | Pair _ | DPair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _
        | Var _ | Lit _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _
        | Ann _ -> Ok (Field (value, name)))
   | Fst a ->
       let* a = normal budget a in
       (match a with
-       | Pair (a, _) -> Ok a
+       | Pair (a, _) | DPair (_, a, _) -> Ok a
        | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Fst a))
   | Snd a ->
       let* a = normal budget a in
       (match a with
-       | Pair (_, b) -> Ok b
+       | Pair (_, b) | DPair (_, _, b) -> Ok b
        | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Var _ | Lit _ | Boolean _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Snd a))
   | Pack (ty, value, proof) ->
       let* ty = normal_ty budget ty in
@@ -88,13 +93,13 @@ let rec normal budget term =
       let* a = normal budget a in
       (match a with
        | Pack (_, value, _) -> Ok value
-       | RecordValue _ | Field _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | Var _ | Lit _ | Boolean _
+       | RecordValue _ | Field _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Var _ | Lit _ | Boolean _
        | Fst _ | Snd _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Value a))
   | Evidence a ->
       let* a = normal budget a in
       (match a with
        | Pack (_, _, proof) -> Ok proof
-       | RecordValue _ | Field _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | Var _ | Lit _ | Boolean _
+       | RecordValue _ | Field _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Var _ | Lit _ | Boolean _
        | Fst _ | Snd _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (Evidence a))
   | Compare (op, a, b) ->
       let* a = normal budget a in
@@ -108,7 +113,7 @@ let rec normal budget term =
            let proof = Refl (Lit (if selected then 1L else 0L)) in
            let* body = subst_term budget proof (if selected then a else b) in
            normal budget body
-       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _
+       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _
        | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | IfProof _ | If _
        | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ ->
            let* ty = normal_ty budget ty in
@@ -120,7 +125,7 @@ let rec normal budget term =
       (match c with
        | Boolean true -> normal budget a
        | Boolean false -> normal budget b
-       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ ->
+       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Fst _ | Snd _ | Var _ | Lit _ | Compare _ | IfProof _ | If _ | Add _ | Lam _ | App _ | Let _ | Refl _ | Transport _ | Ann _ ->
            let* a = normal budget a in
            let* b = normal budget b in
            Ok (If (c, a, b)))
@@ -138,7 +143,7 @@ let rec normal budget term =
       let* a = normal budget a in
       (match f with
        | Lam (_, _, body) -> let* body = subst_term budget a body in normal budget body
-       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (App (r, f, a)))
+       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Fst _ | Snd _ | Boolean _ | Compare _ | IfProof _ | If _ | Var _ | Lit _ | Add _ | App _ | Let _ | Refl _ | Transport _ | Ann _ -> Ok (App (r, f, a)))
   | Let (_, _, value, body) ->
       let* value = normal budget value in
       let* body = subst_term budget value body in
@@ -148,7 +153,7 @@ let rec normal budget term =
       let* proof = normal budget proof in
       (match proof with
        | Refl _ -> normal budget value
-       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Var _ | Lit _ | Boolean _ | Inl _ | Inr _ | Case _ | Pair _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _
+       | RecordValue _ | Field _ | Pack _ | Value _ | Evidence _ | Var _ | Lit _ | Boolean _ | Inl _ | Inr _ | Case _ | Pair _ | DPair _ | Fst _ | Snd _ | Compare _ | IfProof _ | If _
        | Add _ | Lam _ | App _ | Let _ | Transport _ | Ann _ ->
            let* family = normal_ty budget family in
            let* a = normal budget a in
@@ -169,6 +174,11 @@ and normal_ty budget = function
       let* a = normal_ty budget a in
       let* b = normal_ty budget b in
       Ok (Product (a, b))
+  | Sigma (a, b) ->
+      let* () = Budget.tick budget in
+      let* a = normal_ty budget a in
+      let* b = normal_ty budget b in
+      Ok (Sigma (a, b))
   | Record fields ->
       let* () = Budget.tick budget in
       let* fields = map_fields budget (normal_ty budget) fields in
@@ -199,7 +209,8 @@ let rec branch_type budget ty =
   let* () = Budget.tick budget in
   match ty with
   | U32 | Bool -> Ok ()
-  | Product (a, b) | Sum (a, b) -> let* () = branch_type budget a in branch_type budget b
+  | Product (a, b) | Sigma (a, b) | Sum (a, b) ->
+      let* () = branch_type budget a in branch_type budget b
   | Record fields ->
       let* () = record_labels budget fields in
       let* _ = map_fields budget (branch_type budget) fields in Ok ()
@@ -211,7 +222,7 @@ let rec runtime_type budget ty =
   match ty with
   | Eq _ -> Error Runtime_proof
   | U32 | Bool | Pi _ -> Ok ()
-  | Product (a, b) | Sum (a, b) ->
+  | Product (a, b) | Sigma (a, b) | Sum (a, b) ->
       let* () = runtime_type budget a in runtime_type budget b
   | Record fields ->
       let* () = record_labels budget fields in
@@ -239,6 +250,11 @@ let rec well_formed budget context ty =
   | Product (a, b) ->
       let* () = well_formed budget context a in
       well_formed budget context b
+  | Sigma (a, b) ->
+      let* () = branch_type budget a in
+      let* () = branch_type budget b in
+      let* () = well_formed budget context a in
+      well_formed budget ({ relevance = Erased; ty = a } :: context) b
   | Record fields ->
       let* () = record_labels budget fields in
       well_formed_fields budget context fields
@@ -247,7 +263,7 @@ let rec well_formed budget context ty =
       let* () = well_formed budget context a in
       (match proof with
        | Eq _ -> well_formed budget ({ relevance = Erased; ty = a } :: context) proof
-       | U32 | Bool | Record _ | Product _ | Sum _ | Refine _ | Pi _ -> Error Type_mismatch)
+       | U32 | Bool | Record _ | Product _ | Sigma _ | Sum _ | Refine _ | Pi _ -> Error Type_mismatch)
   | Eq (a, b) ->
       let* () = check_term budget Ghost context a U32 in
       check_term budget Ghost context b U32
@@ -297,11 +313,20 @@ and infer budget phase context term =
            let* () = check_term budget phase
              ({ relevance = Runtime; ty = right } :: context) b expected in
            Ok result
-       | U32 | Bool | Record _ | Product _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
+       | U32 | Bool | Record _ | Product _ | Sigma _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Pair (a, b) ->
       let* a = infer budget phase context a in
       let* b = infer budget phase context b in
       Ok (Product (a, b))
+  | DPair (ty, a, b) ->
+      let* () = well_formed budget context ty in
+      (match ty with
+       | Sigma (domain, family) ->
+           let* () = check_term budget phase context a domain in
+           let* range = subst_ty budget a family in
+           let* () = check_term budget phase context b range in
+           Ok ty
+       | U32 | Bool | Record _ | Product _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
   | RecordValue fields ->
       (* The labels are checked before the fields, so an empty or duplicate
          label list wins over a field's own inference error. The field types
@@ -314,13 +339,18 @@ and infer budget phase context term =
       let* ty = infer budget phase context value in
       (match ty with
        | Record fields -> lookup_field budget name fields
-       | U32 | Bool | Product _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
+       | U32 | Bool | Product _ | Sigma _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Fst a ->
       let* ty = infer budget phase context a in
-      (match ty with Product (a, _) -> Ok a | U32 | Bool | Record _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
+      (match ty with
+       | Product (a, _) | Sigma (a, _) -> Ok a
+       | U32 | Bool | Record _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Snd a ->
       let* ty = infer budget phase context a in
-      (match ty with Product (_, b) -> Ok b | U32 | Bool | Record _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
+      (match ty with
+       | Product (_, b) -> Ok b
+       | Sigma (_, family) -> subst_ty budget (Fst a) family
+       | U32 | Bool | Record _ | Sum _ | Refine _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Pack (ty, value, proof) ->
       let* () = well_formed budget context ty in
       (match ty with
@@ -329,12 +359,12 @@ and infer budget phase context term =
            let* evidence = subst_ty budget value family in
            let* () = check_term budget Ghost context proof evidence in
            Ok ty
-       | U32 | Bool | Record _ | Product _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch)
+       | U32 | Bool | Record _ | Product _ | Sigma _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Value a ->
       let* ty = infer budget phase context a in
       (match ty with
        | Refine (a, _) -> Ok a
-       | U32 | Bool | Record _ | Product _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch)
+       | U32 | Bool | Record _ | Product _ | Sigma _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch)
   | Evidence a ->
       (match phase with
        | Execute -> Error Runtime_proof
@@ -342,7 +372,7 @@ and infer budget phase context term =
            let* ty = infer budget phase context a in
            (match ty with
             | Refine (_, family) -> subst_ty budget (Value a) family
-            | U32 | Bool | Record _ | Product _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch))
+            | U32 | Bool | Record _ | Product _ | Sigma _ | Sum _ | Eq _ | Pi _ -> Error Type_mismatch))
   | Compare (_, a, b) ->
       let* () = check_term budget phase context a U32 in
       let* () = check_term budget phase context b U32 in
@@ -384,7 +414,7 @@ and infer budget phase context term =
            else
              let* () = check_term budget (argument_phase phase r) context a domain in
              subst_ty budget a range
-       | U32 | Bool | Record _ | Product _ | Sum _ | Refine _ | Eq _ -> Error Expected_function)
+       | U32 | Bool | Record _ | Product _ | Sigma _ | Sum _ | Refine _ | Eq _ -> Error Expected_function)
   | Let (r, a, value, body) ->
       let* () = well_formed budget context a in
       let* () = check_term budget (argument_phase phase r) context value a in
@@ -416,7 +446,7 @@ let check budget source =
   let rec export_arity count = function
     | U32 -> Ok count
     | Pi (Runtime, U32, rest) -> export_arity (count + 1) rest
-    | Bool | Record _ | Product _ | Sum _ | Refine _ | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Bool | Record _ | Product _ | Sum _ | Refine _ | Eq _ | Pi _), _) -> Error Unsupported_export
+    | Bool | Record _ | Product _ | Sigma _ | Sum _ | Refine _ | Eq _ | Pi (Erased, _, _) | Pi (Runtime, (Bool | Record _ | Product _ | Sigma _ | Sum _ | Refine _ | Eq _ | Pi _), _) -> Error Unsupported_export
   in
   let* parameters = export_arity 0 ty in
   Ok { source; parameters }
