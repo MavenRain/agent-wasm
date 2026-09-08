@@ -1,4 +1,62 @@
-# Compiler validation, 2026-09-07
+# Compiler validation, 2026-09-08
+
+## M1 dependent cases and checked branches, 2026-09-08
+
+Implemented on base `fb8aaf8` in an isolated workspace checkout. The restricted
+Lean value language now types dependent sum elimination and checked branches.
+Handlers retain dependent payload schemas; checked arms receive erased
+equality evidence for the corresponding Boolean outcome. Both constructs use
+formed outer result schemas, weakened under each binder. Identity renaming,
+typed renaming, weakening, result formation, and runtime eligibility cover
+the new forms. The OCaml compiler is unchanged.
+
+`sh scripts/check.sh` passed with zero Lean errors, incomplete proofs, or
+warnings, and zero OCaml build errors or warnings. The eight proof regression
+targets report 77 audited results: 76 depend only on `propext`, and
+`quantityRenaming_access` remains axiom-free. The four new public helper
+theorems are audited by `DependentBranchTest`. Those theorems also close the
+two new helper definitions, `indicator` and `branchEvidence`. The source gate
+found no tactic blocks, project axioms, partial or unsafe definitions, or
+unfinished proofs. The kernel passed 356 cases; the binding suite passed 7,168
+cases; and the host suite passed 1,964 programs across 3,928 Node and Wasmtime
+executions.
+
+The 26 new Lean assertions construct refined sum payloads, eliminate them while
+retaining outer dependencies, and consume each checked branch's evidence in
+a refinement package. They reject stale branch outcomes, erased Execute
+conditions, non-Boolean conditions, evaluation of erased proof variables,
+equality-valued branches in Ghost, and result schemas that capture a payload.
+Explicit renaming equations check outer indices beneath both branch and
+refinement binders.
+
+Four isolated mutations were rejected after an unmodified focused target
+passed. Giving the false arm true-outcome evidence, making proof binders
+runtime, or making case payload binders erased broke the branch regressions.
+Swapping the checked arms during renaming broke the library's identity and
+typed-renaming proofs. The runtime-proof mutation violates the tested relevance
+contract; it does not demonstrate an Execute equality leak, which runtime
+eligibility also excludes.
+
+Review found that assigning the left payload schema to the right case arm
+survived the initial suite. The final suite adds a Boolean right payload beside
+a u32 left payload, with both an acceptance and a rejection assertion. Checked
+refinement schemas also spell out `cond c 1 0` independently of the library's
+indicator helper. Reversing the helper's indicator constants also survived the
+initial suite. Both mutations compiled, and both are rejected by the final
+regressions. The final `sh scripts/check-proofs.sh` run passed after these
+additions, with all 77 axiom reports intact.
+
+Seven direct compiler probes agreed with the modeled boundaries. A dependent
+refinement case and an `if-proof` package were accepted. Wrong-outcome evidence
+and a mismatched dependent case result produced type errors. Runtime use of
+erased evidence and an erased condition produced erased-variable errors.
+A result annotation mentioning a handler binder produced an unknown-name
+error. These probes provide regression evidence, not a proved translation.
+
+The model still lacks general dependent substitution, conversion, and branch
+realization. In particular, typing an arm under assumed evidence does not
+prove that evaluation can reach it only when its assumption holds. See
+[MECHANIZATION.md](MECHANIZATION.md) for the exact remaining boundary.
 
 ## M1 dependent contexts and value typing, 2026-09-07
 

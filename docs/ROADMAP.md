@@ -20,11 +20,12 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: extend the restricted dependent syntax and its index language, then
-prove general dependent typed substitution through context suffixes and
-connect the model to the implementation. Include computed dependent
-projections and the remaining source constructs. Then cover conversion
-adequacy, branch realization, and erasure simulation.
+Next: extend the restricted dependent index language with computed dependent
+projections. Then add refinement evidence projection and Sigma second
+projection to the dependent term fragment. Then prove general dependent typed
+substitution through context suffixes. Then connect the model to the
+implementation. Extend the remaining source constructs alongside that work.
+Then cover conversion adequacy, branch realization, and erasure simulation.
 Named error variants and a reusable surface for these contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
@@ -140,6 +141,16 @@ weakening, and identity renaming are proved. Execute rejects equality results
 and erased variables. This slice does not add general dependent substitution,
 computed dependent projection indices, evidence projection, Sigma second
 projection, conversion, transport, or checked branch evidence to the model.
+
+Implemented sixteenth slice: dependent sum case analysis and checked branches
+in the restricted Lean value language. Case handlers bind runtime payloads
+with their full dependent schemas. Checked branches bind erased evidence that
+the finite condition's indicator equals 1 or 0. Both forms require a formed,
+branch-eligible outer result schema, weakened beneath each branch binder.
+Identity renaming, typed renaming, weakening, result formation, and runtime
+eligibility extend to both constructs. Regressions cover evidence consumption
+inside refinement packages, stale outcomes, erased access, and result capture.
+This establishes typing properties, not branch realization or evaluation.
 
 Dependent substitution, preservation, and erasure simulation remain unproved
 for the general supported fragment. Establish them before calling it

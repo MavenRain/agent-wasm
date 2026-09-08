@@ -309,8 +309,12 @@ examples. The host suite compares source evaluation with Node and Wasmtime,
 including proof erasure and contradictory dead branches. These checks provide
 regression evidence for parts of the obligations, not universal proofs.
 
-Mechanization next extends the dependent syntax and proves general dependent
-typed substitution, then conversion adequacy and branch realization, then the
-value relation and erasure simulation.
+The restricted Lean model includes dependent case handlers and checked branches
+with erased equality declarations. Their typed renaming and weakening results
+do not prove that evaluation realizes a branch assumption.
+
+Mechanization next extends the dependent syntax and its index language and
+proves general dependent typed substitution, then conversion adequacy and
+branch realization, then the value relation and erasure simulation.
 No milestone should be called verified until its claimed fragment and trusted
 backend boundary have corresponding completed proofs.

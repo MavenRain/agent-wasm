@@ -302,7 +302,8 @@ It also proves substitution preserves formation of indexed equality,
 refinement, and Sigma schemas over finite contexts, with composition and
 capture-avoidance laws for terms and schemas. A further restricted model types
 dependent values over scoped telescopes, including Ghost equality evidence,
-refined packages, finite-domain dependent pairs, and lets of either relevance.
+refined packages, finite-domain dependent pairs, lets of either relevance,
+dependent sum case analysis, and checked branches with erased evidence.
 It proves type formation, runtime eligibility, renaming, and weakening for
 that model. General dependent substitution remains open. See the
 [mechanization boundary](docs/MECHANIZATION.md); the dependent compiler and

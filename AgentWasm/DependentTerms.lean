@@ -17,7 +17,10 @@ inductive Term : Nat → Type where
   | snd : Term n → Term n
   | inl : Indexed.Ty n → Term n → Term n
   | inr : Indexed.Ty n → Term n → Term n
+  | case : Indexed.Ty n → Term n → Term (n + 1) → Term (n + 1) → Term n
   | cond : Finite.Term n → Term n → Term n → Term n
+  | ifProof : Indexed.Ty n → Finite.Term n → Term (n + 1) →
+      Term (n + 1) → Term n
   | pack : Finite.Ty → Finite.Term (n + 1) → Finite.Term (n + 1) →
       Finite.Term n → Term n → Term n
   | value : Term n → Term n
@@ -36,7 +39,11 @@ def rename (ρ : Renaming n m) : Term n → Term m
   | .snd t => .snd (rename ρ t)
   | .inl b t => .inl (Indexed.rename ρ b) (rename ρ t)
   | .inr a t => .inr (Indexed.rename ρ a) (rename ρ t)
+  | .case r s a b => .case (Indexed.rename ρ r) (rename ρ s)
+      (rename (liftRen ρ) a) (rename (liftRen ρ) b)
   | .cond c a b => .cond (Finite.rename ρ c) (rename ρ a) (rename ρ b)
+  | .ifProof r c a b => .ifProof (Indexed.rename ρ r) (Finite.rename ρ c)
+      (rename (liftRen ρ) a) (rename (liftRen ρ) b)
   | .pack a l r v h => .pack a (Finite.rename (liftRen ρ) l)
       (Finite.rename (liftRen ρ) r) (Finite.rename ρ v) (rename ρ h)
   | .value t => .value (rename ρ t)
@@ -56,6 +63,12 @@ private theorem congrArg3 (f : α → β → γ → δ)
     (ha : a = a') (hb : b = b') (hc : c = c') : f a b c = f a' b' c' :=
   Eq.trans (congrArg (fun x => f x b c) ha) (congrArg2 (f a') hb hc)
 
+private theorem congrArg4 (f : α → β → γ → δ → ε)
+    {a a' : α} {b b' : β} {c c' : γ} {d d' : δ}
+    (ha : a = a') (hb : b = b') (hc : c = c') (hd : d = d') :
+    f a b c d = f a' b' c' d' :=
+  Eq.trans (congrArg (fun x => f x b c d) ha) (congrArg3 (f a') hb hc hd)
+
 theorem rename_identity (t : Term n) (ρ : Renaming n n) (h : ∀ i, ρ i = i) :
     rename ρ t = t :=
   match t with
@@ -70,8 +83,16 @@ theorem rename_identity (t : Term n) (ρ : Renaming n n) (h : ∀ i, ρ i = i) :
       (Indexed.rename_identity b ρ h) (rename_identity t ρ h)
   | .inr a t => congrArg2 Term.inr
       (Indexed.rename_identity a ρ h) (rename_identity t ρ h)
+  | .case r s a b => congrArg4 Term.case
+      (Indexed.rename_identity r ρ h) (rename_identity s ρ h)
+      (rename_identity a (liftRen ρ) (liftRen_identity h))
+      (rename_identity b (liftRen ρ) (liftRen_identity h))
   | .cond c a b => congrArg3 Term.cond (Finite.rename_identity c ρ h)
       (rename_identity a ρ h) (rename_identity b ρ h)
+  | .ifProof r c a b => congrArg4 Term.ifProof
+      (Indexed.rename_identity r ρ h) (Finite.rename_identity c ρ h)
+      (rename_identity a (liftRen ρ) (liftRen_identity h))
+      (rename_identity b (liftRen ρ) (liftRen_identity h))
   | .pack a l r v hh => Eq.trans
       (congrArg (fun x => Term.pack a x (Finite.rename (liftRen ρ) r)
         (Finite.rename ρ v) (rename ρ hh))
@@ -108,8 +129,34 @@ theorem runtimeType_rename (p : Phase) (a : Indexed.Ty n)
   | .execute => Indexed.branch_rename a ρ
   | .ghost => rfl
 
+/-- Reify a Boolean condition as the finite index used by branch evidence. -/
+def indicator (c : Finite.Term n) : Finite.Term n :=
+  .cond c (.uint 1) (.uint 0)
+
+/-- A proof branch receives this declaration before its binder is added. -/
+def branchEvidence (c : Finite.Term n) (outcome : Fin (2 ^ 32)) :
+    Indexed.Ty n :=
+  .eq (indicator c) (.uint outcome)
+
+theorem indicator_rename (c : Finite.Term n) (ρ : Renaming n m) :
+    Finite.rename ρ (indicator c) = indicator (Finite.rename ρ c) := rfl
+
+theorem branchEvidence_rename (c : Finite.Term n) (outcome : Fin (2 ^ 32))
+    (ρ : Renaming n m) :
+    Indexed.rename ρ (branchEvidence c outcome) =
+      branchEvidence (Finite.rename ρ c) outcome := rfl
+
+theorem indicator_hasType {Γ : Context n} {c : Finite.Term n}
+    (hc : IndexHasType Γ c .bool) : IndexHasType Γ (indicator c) .u32 :=
+  .cond hc .uint .uint
+
+theorem branchEvidence_wellFormed {Γ : Context n} {c : Finite.Term n}
+    (hc : IndexHasType Γ c .bool) (outcome : Fin (2 ^ 32)) :
+    WellFormed Γ (branchEvidence c outcome) :=
+  .eq (indicator_hasType hc) .uint
+
 /-- Exact schema equality is used here; conversion is a later obligation.
-    Let results are outer schemas, so the new binder cannot escape. -/
+    Let and branch results are outer schemas, so new binders cannot escape. -/
 inductive HasType : Phase → Context n → Quantities n →
     Term n → Indexed.Ty n → Prop where
   | var : WellFormed Γ (lookup Γ i) → Accessible p (q i) →
@@ -125,9 +172,23 @@ inductive HasType : Phase → Context n → Quantities n →
       HasType p Γ q t a → HasType p Γ q (.inl b t) (.sum a b)
   | inr : WellFormed Γ a → Indexed.BranchType a → Indexed.BranchType b →
       HasType p Γ q t b → HasType p Γ q (.inr a t) (.sum a b)
+  | case : WellFormed Γ result → Indexed.BranchType result →
+      HasType p Γ q s (.sum a b) →
+      HasType p (.snoc Γ a) (extendWith q .run) l
+        (Indexed.rename Fin.succ result) →
+      HasType p (.snoc Γ b) (extendWith q .run) r
+        (Indexed.rename Fin.succ result) →
+      HasType p Γ q (.case result s l r) result
   | cond : IndexHasType Γ c .bool → Allowed p q c → Indexed.BranchType a →
       HasType p Γ q l a → HasType p Γ q r a →
       HasType p Γ q (.cond c l r) a
+  | ifProof : WellFormed Γ result → Indexed.BranchType result →
+      IndexHasType Γ c .bool → Allowed p q c →
+      HasType p (.snoc Γ (branchEvidence c 1)) (extendWith q .erase) l
+        (Indexed.rename Fin.succ result) →
+      HasType p (.snoc Γ (branchEvidence c 0)) (extendWith q .erase) r
+        (Indexed.rename Fin.succ result) →
+      HasType p Γ q (.ifProof result c l r) result
   | pack : WellFormed Γ (.refine a l r) → IndexHasType Γ v a →
       Allowed p q v → HasType .ghost Γ q h
         (.eq (Finite.instantiate l v) (Finite.instantiate r v)) →
@@ -156,7 +217,9 @@ theorem HasType.wellFormed {p : Phase} {Γ : Context n} {q : Quantities n}
   | .snd ht => match ht.wellFormed with | .product (_ha) hb => hb
   | .inl hb ba bb ht => .sum ba bb ht.wellFormed hb
   | .inr ha ba bb ht => .sum ba bb ha ht.wellFormed
+  | .case ha (_ba) (_hs) (_hl) (_hr) => ha
   | .cond (_hc) (_hq) (_ba) hl (_hr) => hl.wellFormed
+  | .ifProof ha (_ba) (_hc) (_hq) (_hl) (_hr) => ha
   | .pack ha (_hv) (_hq) (_hh) => ha
   | .value (_ht) => .base
   | .dpair ha (_hv) (_hq) (_ht) => ha
@@ -196,7 +259,9 @@ theorem HasType.runtimeType {p : Phase} {Γ : Context n} {q : Quantities n}
   | .snd ht => runtime_product_right ht.runtimeType
   | .inl (_hb) ba bb (_ht) | .inr (_ha) ba bb (_ht) =>
       runtime_branch _ ⟨ba, bb⟩
+  | .case (_ha) ba (_hs) (_hl) (_hr) => runtime_branch _ ba
   | .cond (_hc) (_hq) ba (_hl) (_hr) => runtime_branch _ ba
+  | .ifProof (_ha) ba (_hc) (_hq) (_hl) (_hr) => runtime_branch _ ba
   | .pack (_ha) (_hv) (_hq) (_hh) => runtime_branch _ True.intro
   | .value (_ht) | .dfst (_ht) => runtime_branch _ True.intro
   | .dpair ha (_hv) (_hq) (_ht) => match ha with
@@ -272,10 +337,23 @@ theorem HasType.rename {p : Phase} {Γ : Context n} {q : Quantities n}
   | .inr ha ba bb ht => .inr (ha.rename ρ hΓ)
       (Eq.mpr (Indexed.branch_rename _ ρ) ba)
       (Eq.mpr (Indexed.branch_rename _ ρ) bb) (ht.rename ρ hΓ hq)
+  | .case ha ba hs hl hr => .case (ha.rename ρ hΓ)
+      (Eq.mpr (Indexed.branch_rename _ ρ) ba) (hs.rename ρ hΓ hq)
+      (rename_weaken _ ρ ▸ hl.rename (liftRen ρ)
+        (liftRen_preserves hΓ _) (quantityRenaming_lift hq _))
+      (rename_weaken _ ρ ▸ hr.rename (liftRen ρ)
+        (liftRen_preserves hΓ _) (quantityRenaming_lift hq _))
   | .cond hc hv ba hl hr => .cond (hc.rename ρ hΓ)
       (hv.rename ρ (quantityRenaming_access hq _))
       (Eq.mpr (Indexed.branch_rename _ ρ) ba)
       (hl.rename ρ hΓ hq) (hr.rename ρ hΓ hq)
+  | .ifProof ha ba hc hv hl hr => .ifProof (ha.rename ρ hΓ)
+      (Eq.mpr (Indexed.branch_rename _ ρ) ba) (hc.rename ρ hΓ)
+      (hv.rename ρ (quantityRenaming_access hq _))
+      (rename_weaken _ ρ ▸ hl.rename (liftRen ρ)
+        (liftRen_preserves hΓ _) (quantityRenaming_lift hq _))
+      (rename_weaken _ ρ ▸ hr.rename (liftRen ρ)
+        (liftRen_preserves hΓ _) (quantityRenaming_lift hq _))
   | .pack ha hv hqv hh => .pack (ha.rename ρ hΓ) (hv.rename ρ hΓ)
       (hqv.rename ρ (quantityRenaming_access hq _))
       (index_rename_instantiate _ _ ρ ▸

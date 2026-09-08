@@ -210,8 +210,9 @@ public theorem audits report only `propext`.
 
 `AgentWasm/DependentTerms.lean` adds `Dependent.Term n` and phase-sensitive
 `Dependent.HasType`. Terms include variables, embedded finite terms, equality
-reflexivity, products and projections, sum injections, ordinary conditionals,
-refinement `pack` and `value`, finite-domain `dpair` and `dfst`, annotations,
+reflexivity, products and projections, sum injections and case analysis,
+ordinary conditionals and checked branches, refinement `pack` and `value`,
+finite-domain `dpair` and `dfst`, annotations,
 and lets with either relevance. All type annotations are scoped schemas.
 This is a separate mathematical syntax, not a translation of the OCaml AST.
 
@@ -231,6 +232,16 @@ for the body. The result must be an outer schema `B`, and the body has type
 result type. This restriction does not establish dependent binder-removing
 substitution.
 
+Dependent `case` binds each sum payload with its full schema and runtime
+relevance. `ifProof` checks a finite Boolean condition in the enclosing phase
+and adds an erased equality declaration in each arm. The declarations relate
+`indicator c`, defined as `cond c 1 0`, to 1 in the true arm and 0 in the false
+arm. The public `branchEvidence` helper constructs those declarations;
+`indicator_hasType` and `branchEvidence_wellFormed` prove their formation.
+Both constructs require a formed, branch-eligible result schema in the outer
+context, even in Ghost. Each arm checks against its weakening. Branch evidence
+can be consumed in a package's Ghost proof, but cannot be evaluated in Execute.
+
 `RuntimeType` requires `Indexed.BranchType` in Execute and permits any formed
 schema in Ghost. Products may therefore carry equality evidence in Ghost,
 but no Execute result exposes equality, even inside a product. Sum payloads,
@@ -245,7 +256,9 @@ terms and schemas. A renaming preserves dependent lookup schemas and exact
 slot relevance, including Ghost subterms inside Execute terms. Weakening
 can add a declaration of either relevance. The proof includes commutation
 of renaming with finite endpoint and schema instantiation, and lifting
-beneath let binders. No general dependent term substitution is defined.
+beneath let, case, and checked-branch binders. The indicator and evidence
+helpers also commute with renaming. No general dependent term substitution
+is defined.
 
 Typing uses exact schema equality without conversion. In particular,
 `.base (.product A B)` and `.product (.base A) (.base B)` remain distinct
@@ -254,14 +267,17 @@ conversion between these representations or from a source type to its shape.
 
 `proof-test/DependentTermTest.lean` exercises dependent packages, Ghost
 evidence, erased lets, phase rejection, and renaming beneath nested binders.
-All seven regression targets are default Lake targets with warnings as
+`proof-test/DependentBranchTest.lean` adds dependent payload elimination,
+checked refinement construction, both branch outcomes, result capture rejection,
+and renaming under branch and refinement binders. It also rejects erased access
+in unselected arms and invalid Execute conditions.
+All eight regression targets are default Lake targets with warnings as
 errors. `scripts/check-proofs.sh` checks the expected axiom reports.
 
 ## Remaining boundary
 
-The dependent term fragment does not include Pi or case analysis on dependent
-values. Records, conversion, transport, checked branch evidence, refinement
-evidence projection, and Sigma second projection are also absent. Refinement
+The dependent term fragment does not include Pi, records, conversion, transport,
+refinement evidence projection, or Sigma second projection. Refinement
 and Sigma domains remain finite. Computed dependent projections cannot occur
 inside type indices or in a conditional scrutinee. General dependent
 substitution, including substitution through a context suffix, remains open.
@@ -275,8 +291,8 @@ budget accounting, evaluator, erasure, and Wasm backend remain outside this
 mechanization. Scope is enforced by the model's indices; this does not show
 that the compiler's integer indices or negative shifts preserve scope.
 
-Next extend the dependent syntax and its index language, then prove general
-dependent typed substitution through telescopes and establish correspondence
-with the implementation.
+Next extend the dependent term syntax and its index language with computed
+projections, then prove general dependent typed substitution through telescopes
+and establish correspondence with the implementation.
 Conversion adequacy, branch realization, preservation, and erasure simulation
 remain later obligations. The compiler as a whole is not formally verified.

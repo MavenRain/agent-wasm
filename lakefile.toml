@@ -3,7 +3,7 @@ version = "0.1.0"
 defaultTargets = [
   "AgentWasm", "BindingTest", "PhaseTest", "BindingLawsTest",
   "ErasedContextTest", "IndexedTypeTest", "DependentContextTest",
-  "DependentTermTest"
+  "DependentTermTest", "DependentBranchTest"
 ]
 
 [[lean_lib]]
@@ -42,5 +42,10 @@ moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
 name = "DependentTermTest"
+srcDir = "proof-test"
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "DependentBranchTest"
 srcDir = "proof-test"
 moreLeanArgs = ["-DwarningAsError=true"]

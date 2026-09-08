@@ -22,8 +22,11 @@ Dependent telescopes store scoped schemas over preceding entries. Their finite
 index typing accepts only explicit base declarations, with no coercion from a
 dependent type to its runtime shape. Restricted dependent terms include Ghost
 equality evidence, refinement construction and payload projection, finite-domain
-dependent pairs and first projection, products, sum injections, conditionals,
-annotations, and lets with either relevance. Renaming and weakening preserve
-their phase-sensitive typing, and every typed result has a formed schema.
+dependent pairs and first projection, products, sum injections, case analysis,
+conditionals, checked branches, annotations, and lets with either relevance.
+Case handlers bind runtime payloads with their dependent schemas; checked
+branches bind erased evidence of the condition's indicator. Renaming and
+weakening preserve phase-sensitive typing, and every typed result has a
+formed schema.
 General dependent substitution and compiler correspondence remain open.
 See `docs/MECHANIZATION.md` for the exact fragment and remaining obligations.
