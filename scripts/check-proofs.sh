@@ -26,6 +26,9 @@ audit_axioms() {
 
 audit_axioms proof-test/BindingTest.lean 6
 audit_axioms proof-test/PhaseTest.lean 6
+audit_axioms proof-test/BindingLawsTest.lean 14
+audit_axioms proof-test/ErasedContextTest.lean 4
+audit_axioms proof-test/IndexedTypeTest.lean 23
 
 hits=$(rg -n ':= by|^[[:space:]]*by$|^axiom |^partial |^unsafe |sorry' \
   AgentWasm.lean AgentWasm proof-test || true)

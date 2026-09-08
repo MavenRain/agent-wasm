@@ -1,5 +1,50 @@
 # Compiler validation, 2026-09-07
 
+## M1 indexed formation and binding composition, 2026-09-07
+
+Implemented on base `b8c8d55` in a workspace checkout. Added indexed equality,
+refinement, and Sigma schemas over finite contexts and finite binder domains,
+formation-preserving substitution, term and schema composition laws, and
+erased context binder removal. The OCaml compiler is unchanged. The exact
+scope and remaining dependent typing obligations are in
+[MECHANIZATION.md](MECHANIZATION.md).
+
+```text
+sh scripts/check.sh
+  OK lake: 0 errors, 0 sorries, 0 warnings
+OK axioms: proof-test/BindingTest.lean reports 6 results, each [propext].
+OK axioms: proof-test/PhaseTest.lean reports 6 results, each [propext].
+OK axioms: proof-test/BindingLawsTest.lean reports 14 results, each [propext].
+OK axioms: proof-test/ErasedContextTest.lean reports 4 results, each [propext].
+OK axioms: proof-test/IndexedTypeTest.lean reports 23 results, each [propext].
+  OK sources: no tactic block, project axiom, partial, unsafe, or sorry.
+  OK build: 0 errors, 0 warnings
+  kernel: 356 cases, 0 failures
+  binding: 7168 cases, 0 failures
+  e2e: 1964 programs, 3928 host executions
+  erasure and rejection checks passed
+```
+
+All five regression targets are part of the default Lake build with
+warnings as errors. The axiom gate retains the existing 12 reports and
+adds 41 reports for the new results. Explicit expected syntax checks open
+replacement capture under nested Sigma/refinement binders and under both
+case handlers with nested lets. Formation regressions reject boolean
+equality endpoints and proof-bearing sum or Sigma ranges. Ghost indices
+can read erased target slots; Execute terms still cannot.
+
+An isolated copy combining the indexed module and its regressions passed
+unchanged. Three mutations each failed: substituting the left refinement
+endpoint into both positions, allowing exposed equality in branch types,
+and requiring a boolean right equality endpoint. The schema identity and
+substitution proofs rejected the first mutation. The formation examples in
+`IndexedTypeTest` rejected the other two. Shared sources and build
+artifacts were not modified by the mutation checks.
+
+These results establish binding and formation facts about the Lean model.
+They do not prove dependent term substitution, conversion adequacy, or
+correspondence with the production OCaml checker and erasure.
+
 ## M1 phase-sensitive finite binding, 2026-09-07
 
 Extended the staged finite binding slice with `AgentWasm.Phases` and the

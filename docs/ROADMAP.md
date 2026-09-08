@@ -20,10 +20,11 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: extend the mechanized binding fragment to dependent types and erased
-binders, prove dependent typed substitution, and connect it to the
-implementation. Then cover conversion adequacy, branch realization, and
-erasure simulation.
+Next: extend indexed type formation from finite contexts and binder domains
+to dependent context entries and dependent term typing, then prove typed
+substitution for that fragment and connect it to the implementation. Include
+erased term binders and phase transitions within terms. Then cover conversion
+adequacy, branch realization, and erasure simulation.
 Named error variants and a reusable surface for these contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
@@ -111,8 +112,17 @@ Implemented thirteenth slice: phase-sensitive contexts over the same finite
 syntax, with runtime and erased variable slots. Renaming, weakening,
 simultaneous typed substitution, and runtime binder removal preserve access
 in Execute or Ghost. Regressions reject erased-variable access beneath
-binders and in unselected branches. Erased binders, phase transitions inside
-terms, and dependent substitution remain open.
+binders and in unselected branches.
+
+Implemented fourteenth slice: indexed equality, refinement, product, sum,
+and Sigma type schemas over finite contexts and finite binder domains.
+Renaming and typed finite substitution preserve their formation; open
+replacements lift beneath both refinement and Sigma binders. Term and schema
+binding laws cover composition, weakening cancellation, and commuting
+substitution with instantiation. Schema representation and branch eligibility
+are invariant under index substitution. Erased context slots support weakening
+and removal using Ghost replacements while preserving the enclosing phase.
+These results do not type dependent terms or dependent context entries.
 
 Dependent substitution, preservation, and erasure simulation remain unproved
 for the general supported fragment. Establish them before calling it

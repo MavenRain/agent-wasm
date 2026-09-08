@@ -11,7 +11,11 @@ name = "agent-wasm"
 path = "../agent-wasm"
 ```
 
-Then `import AgentWasm` exposes `AgentWasm.Finite` and its `Phased` namespace.
-The latter adds runtime and ghost access rules for finite contexts, with
-phase-preserving renaming and substitution results.
+Then `import AgentWasm` exposes `AgentWasm.Finite`, its `Phased` namespace,
+and `AgentWasm.Indexed`. Finite terms have binding composition laws and
+phase-preserving substitution, including removal of erased context binders.
+Indexed type schemas have formation-preserving substitution over finite
+contexts, binding composition, and invariance of a schema shape function
+under index maps. Their domains remain non-dependent finite types;
+dependent term typing remains open.
 See `docs/MECHANIZATION.md` for the exact fragment and remaining obligations.
