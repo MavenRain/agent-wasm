@@ -20,10 +20,10 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: extend indexed type formation from finite contexts and binder domains
-to dependent context entries and dependent term typing, then prove typed
-substitution for that fragment and connect it to the implementation. Include
-erased term binders and phase transitions within terms. Then cover conversion
+Next: extend the restricted dependent syntax and its index language, then
+prove general dependent typed substitution through context suffixes and
+connect the model to the implementation. Include computed dependent
+projections and the remaining source constructs. Then cover conversion
 adequacy, branch realization, and erasure simulation.
 Named error variants and a reusable surface for these contracts remain open.
 
@@ -123,6 +123,23 @@ substitution with instantiation. Schema representation and branch eligibility
 are invariant under index substitution. Erased context slots support weakening
 and removal using Ghost replacements while preserving the enclosing phase.
 These results do not type dependent terms or dependent context entries.
+
+Implemented fifteenth slice: scoped dependent telescopes with lookup shifting,
+formation of their declarations, and conservative finite index typing.
+Dependent equality, refinement, and Sigma entries retain their source schemas;
+no runtime shape coercion makes them finite indices. Renaming and weakening
+preserve index typing and schema formation, and lookup in a formed telescope
+returns a formed schema.
+
+A restricted dependent value language adds Ghost equality evidence, refined
+packages with Ghost proofs, payload projection, finite-domain dependent pairs
+and first projection, products, sum injections, conditionals, annotations,
+and lets of either relevance. Let results are weakened outer schemas, so
+the new binder cannot escape. Result formation, runtime eligibility, renaming,
+weakening, and identity renaming are proved. Execute rejects equality results
+and erased variables. This slice does not add general dependent substitution,
+computed dependent projection indices, evidence projection, Sigma second
+projection, conversion, transport, or checked branch evidence to the model.
 
 Dependent substitution, preservation, and erasure simulation remain unproved
 for the general supported fragment. Establish them before calling it

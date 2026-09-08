@@ -7,8 +7,14 @@ The [Lean binding library](MECHANIZATION.md) proves typed substitution
 results over intrinsically scoped terms, including phase access for a
 non-dependent subset and erased context binder removal. It also proves
 formation-preserving substitution for indexed type schemas over finite
-contexts, with binding composition laws. Its exact boundary is stated
-separately. The full dependent obligations below remain open.
+contexts, with binding composition laws. A further restricted model types
+dependent values over scoped telescopes, including Ghost evidence, refinement
+packages, finite-domain dependent pairs, and lets of either relevance. It
+proves result formation, runtime eligibility, renaming, and weakening, using
+exact schemas and a conservative finite index language without shape coercion.
+General dependent substitution and implementation correspondence remain open.
+Its exact boundary is stated separately. The full dependent obligations below
+remain open.
 The [syntax specification](SPEC.md) defines the concrete forms and limits.
 
 ## Contexts, phases, and substitution
@@ -303,7 +309,8 @@ examples. The host suite compares source evaluation with Node and Wasmtime,
 including proof erasure and contradictory dead branches. These checks provide
 regression evidence for parts of the obligations, not universal proofs.
 
-Mechanization should first cover scope and typed substitution, then conversion
-adequacy and branch realization, then the value relation and erasure simulation.
+Mechanization next extends the dependent syntax and proves general dependent
+typed substitution, then conversion adequacy and branch realization, then the
+value relation and erasure simulation.
 No milestone should be called verified until its claimed fragment and trusted
 backend boundary have corresponding completed proofs.

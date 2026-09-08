@@ -3,3 +3,5 @@ import AgentWasm.Phases
 import AgentWasm.BindingLaws
 import AgentWasm.ErasedContexts
 import AgentWasm.IndexedTypes
+import AgentWasm.DependentContexts
+import AgentWasm.DependentTerms

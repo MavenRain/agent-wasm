@@ -295,12 +295,16 @@ node scripts/run.mjs /tmp/tool-budget.wasm 7 60 41 100 0
 
 Full validation also requires the Lean version pinned in `lean-toolchain`.
 `sh scripts/check-proofs.sh` checks the reusable `AgentWasm` proof library
-and its binding, phase, and indexed-type regressions. The library holds scope
-by construction and proves typed substitution for non-dependent finite terms,
+and its binding, phase, indexed-type, and dependent-value regressions. Scope
+holds by construction. It proves typed substitution for non-dependent terms,
 including runtime and ghost variable access and erased context binder removal.
 It also proves substitution preserves formation of indexed equality,
 refinement, and Sigma schemas over finite contexts, with composition and
-capture-avoidance laws for terms and schemas. See the
+capture-avoidance laws for terms and schemas. A further restricted model types
+dependent values over scoped telescopes, including Ghost equality evidence,
+refined packages, finite-domain dependent pairs, and lets of either relevance.
+It proves type formation, runtime eligibility, renaming, and weakening for
+that model. General dependent substitution remains open. See the
 [mechanization boundary](docs/MECHANIZATION.md); the dependent compiler and
 its erasure are not formally verified.
 

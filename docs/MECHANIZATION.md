@@ -1,4 +1,4 @@
-# Mechanized binding and indexed type formation
+# Mechanized binding and restricted dependent typing
 
 `AgentWasm/Substitution.lean` begins the binding obligations from
 [SEMANTICS.md](SEMANTICS.md). Run `sh scripts/check-proofs.sh` or `lake build`.
@@ -124,11 +124,11 @@ the result schema. Both binders increase the endpoint scope by one.
 Products and sums can contain indexed schemas recursively.
 
 The domains of refinements and Sigma pairs are deliberately restricted to
-`Finite.Ty`. Context entries also stay finite and non-dependent. In
-particular, the model does not substitute a refined variable's payload
-shape for its source type: the source checker requires an explicit `value`
-projection. Terms cannot carry indexed type annotations or produce refined
-or dependent-pair values in this model.
+`Finite.Ty`. This module's formation judgment uses finite, non-dependent
+context entries. It does not substitute a refined variable's payload shape
+for its source type: the source checker requires an explicit `value`
+projection. The dependent modules below add telescopes and restricted value
+typing while retaining finite domains and a separate finite index language.
 
 `WellFormed` checks both equality endpoints at u32 using the existing finite
 typing judgment. This is equivalent to Ghost typing for any relevance map
@@ -170,17 +170,103 @@ establish erasure simulation or validate the compiler's representation.
 binders, uses heterogeneous contexts and open Ghost replacements, rejects
 boolean equality endpoints and proof-bearing sum or Sigma ranges, and
 checks the binding laws. Its 23 audited results report only `propext`.
-All five regression targets are default Lake targets with warnings as
-errors, and `scripts/check-proofs.sh` checks every expected axiom report.
+
+## Dependent telescopes
+
+`AgentWasm/DependentContexts.lean` introduces `Dependent.Context n`.
+`Context.snoc G A` stores `A : Indexed.Ty n` over the preceding telescope
+`G : Context n`. The declaration cannot refer to itself. `lookup` moves the
+stored schema into the full current scope, shifting past its own binder and
+each newer entry. For example, adding `eq (var 0) (uint 7)` after a u32
+entry yields `eq (var 1) (uint 7)` at lookup index zero. Adding another
+entry moves that equality to index one and its endpoint to index two.
+Lifting preserves the bound indices inside refinement and Sigma schemas.
+
+`IndexHasType` types the existing finite term language against this telescope.
+Its variable rule requires `lookup G i = .base A`. A refinement or Sigma
+declaration does not become a finite value merely because `Indexed.shape`
+returns a finite representation. Equality evidence cannot become a u32
+index either. Explicit dependent projections belong to the separate value
+language; their results cannot yet be embedded back into finite indices.
+
+`Dependent.WellFormed` checks schemas using `IndexHasType`, allowing earlier
+base entries to appear in later equality, refinement, and Sigma declarations.
+Type formation permits either relevance in indices. It retains the
+restrictions on sum payloads and Sigma ranges. Declaration
+formation is separate from proving equality of its endpoints. The recursive
+`Context.WellFormed` judgment checks every entry over its preceding telescope,
+and `Context.WellFormed.lookup` proves formation of a looked-up schema in the
+complete context.
+
+`RenamingPreserves` compares complete lookup schemas after renaming. Its
+lifting theorem handles an added dependent declaration. Renaming and weakening
+preserve both `IndexHasType` and `Dependent.WellFormed`, including schema and
+finite term binders. `proof-test/DependentContextTest.lean` checks explicit
+lookup offsets, refutes stale endpoints, rejects implicit shape coercions,
+and exercises nonuniform open renaming beneath nested binders. Its seven
+public theorem audits report only `propext`.
+
+## Restricted dependent values
+
+`AgentWasm/DependentTerms.lean` adds `Dependent.Term n` and phase-sensitive
+`Dependent.HasType`. Terms include variables, embedded finite terms, equality
+reflexivity, products and projections, sum injections, ordinary conditionals,
+refinement `pack` and `value`, finite-domain `dpair` and `dfst`, annotations,
+and lets with either relevance. All type annotations are scoped schemas.
+This is a separate mathematical syntax, not a translation of the OCaml AST.
+
+Variables require a formed lookup schema, access to their relevance slot,
+and a result type permitted in the current phase. Equality reflexivity is
+typed in Ghost. `pack` checks its payload as a finite index term in the
+enclosing phase and its instantiated equality proof in Ghost. `dpair` also
+uses a finite index term for its first component, and checks the second
+component against the instantiated range. `value` and `dfst` produce base
+schemas but are not finite index syntax. Ordinary product projections are
+separate from Sigma projection. There is no Sigma second projection yet.
+
+An erased let checks its value in Ghost; a runtime let checks its value in
+the enclosing phase. Both extend the dependent telescope and relevance map
+for the body. The result must be an outer schema `B`, and the body has type
+`Indexed.rename Fin.succ B`. Thus the new binder cannot escape through the
+result type. This restriction does not establish dependent binder-removing
+substitution.
+
+`RuntimeType` requires `Indexed.BranchType` in Execute and permits any formed
+schema in Ghost. Products may therefore carry equality evidence in Ghost,
+but no Execute result exposes equality, even inside a product. Sum payloads,
+conditional results, and Sigma ranges retain their branch restrictions.
+`HasType.wellFormed` proves result schema formation, and `HasType.runtimeType`
+proves result eligibility. `execute_equality_rejected` and
+`erased_var_rejected` rule out Execute equality results and erased variables.
+
+`rename_identity` and `rename_id` cover every term constructor.
+`HasType.rename` and `HasType.weaken` preserve typing while renaming both
+terms and schemas. A renaming preserves dependent lookup schemas and exact
+slot relevance, including Ghost subterms inside Execute terms. Weakening
+can add a declaration of either relevance. The proof includes commutation
+of renaming with finite endpoint and schema instantiation, and lifting
+beneath let binders. No general dependent term substitution is defined.
+
+Typing uses exact schema equality without conversion. In particular,
+`.base (.product A B)` and `.product (.base A) (.base B)` remain distinct
+Lean schemas even though they represent the same OCaml type. There is no
+conversion between these representations or from a source type to its shape.
+
+`proof-test/DependentTermTest.lean` exercises dependent packages, Ghost
+evidence, erased lets, phase rejection, and renaming beneath nested binders.
+All seven regression targets are default Lake targets with warnings as
+errors. `scripts/check-proofs.sh` checks the expected axiom reports.
 
 ## Remaining boundary
 
-This library does not model dependent term typing, Pi, erased let terms,
-phase transitions within terms, conversion, records, transport, or checked
-branch evidence. Equality, refinement, and Sigma occur only as indexed type
-schemas with finite binder domains. There is no typing relation for their
-proofs, packages, or dependent pairs. Phase access applies to finite terms;
-dependent context entries and substitution through them remain open.
+The dependent term fragment does not include Pi or case analysis on dependent
+values. Records, conversion, transport, checked branch evidence, refinement
+evidence projection, and Sigma second projection are also absent. Refinement
+and Sigma domains remain finite. Computed dependent projections cannot occur
+inside type indices or in a conditional scrutinee. General dependent
+substitution, including substitution through a context suffix, remains open.
+The indexed substitution laws above concern finite replacements and do not
+close this obligation.
 
 There is no verified translation between this syntax and `lib/ast.ml`, and
 the OCaml checker does not consume Lean certificates. The existing named
@@ -189,8 +275,8 @@ budget accounting, evaluator, erasure, and Wasm backend remain outside this
 mechanization. Scope is enforced by the model's indices; this does not show
 that the compiler's integer indices or negative shifts preserve scope.
 
-Next extend indexed formation to dependent contexts and binder domains,
-add dependent term typing and erased term binders, then prove dependent
-typed substitution and establish correspondence with the implementation.
+Next extend the dependent syntax and its index language, then prove general
+dependent typed substitution through telescopes and establish correspondence
+with the implementation.
 Conversion adequacy, branch realization, preservation, and erasure simulation
 remain later obligations. The compiler as a whole is not formally verified.

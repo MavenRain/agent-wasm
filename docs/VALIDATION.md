@@ -1,5 +1,67 @@
 # Compiler validation, 2026-09-07
 
+## M1 dependent contexts and value typing, 2026-09-07
+
+Implemented on base `aafca71` in an isolated workspace checkout. Added
+dependent telescopes, conservative finite index typing, and a restricted
+dependent value language. Formation, typed renaming, and weakening cover
+dependent context entries. Value typing includes Ghost equality evidence,
+refinement construction, finite-domain Sigma construction, and lets with
+either relevance. The OCaml compiler is unchanged. See
+[MECHANIZATION.md](MECHANIZATION.md) for the exact fragment and exclusions.
+
+`sh scripts/check.sh` passed:
+
+```text
+OK lake: 0 errors, 0 sorries, 0 warnings
+OK axioms: proof-test/BindingTest.lean reports 6 results, each [propext].
+OK axioms: proof-test/PhaseTest.lean reports 6 results, each [propext].
+OK axioms: proof-test/BindingLawsTest.lean reports 14 results, each [propext].
+OK axioms: proof-test/ErasedContextTest.lean reports 4 results, each [propext].
+OK axioms: proof-test/IndexedTypeTest.lean reports 23 results, each [propext].
+OK axioms: proof-test/DependentContextTest.lean reports 7 results, each [propext].
+OK axioms: proof-test/DependentTermTest.lean reports 13 results, 1 axiom-free, remaining [propext].
+OK sources: no tactic block, project axiom, partial, unsafe, or sorry.
+OK build: 0 errors, 0 warnings
+kernel: 356 cases, 0 failures
+binding: 7168 cases, 0 failures (25 term and 9 type constructors; 750 generated samples, 607 distinct)
+e2e: 1964 programs, 3928 host executions, erasure and rejection checks passed
+```
+
+All seven regression targets are default Lake targets with warnings as
+errors. `DependentContextTest` adds 47 Lean assertions, including dependent
+lookup shifts, formation, open renaming beneath binders, and rejection of
+implicit shape coercions. `DependentTermTest` adds 41 assertions covering
+Ghost evidence, erased-variable access, exact Sigma instantiation, eager
+fields, both conditional branches, erased lets, nested binder renaming, and
+the finite type of a packed payload and of a Sigma witness. These are
+checked proof terms and syntax equations, not runtime test cases.
+
+The axiom gate keeps the original 53 reports on `propext` only. It adds
+seven context results on `propext` and 13 term results, with exactly one
+axiom-free result (`quantityRenaming_access`). The gate checks both classes
+separately, and it also pins the name of the axiom-free result. Any other
+dependency, a substituted report, or a missing report fails the check.
+
+Six isolated mutations were rejected after the unmodified focused targets
+passed: redirecting an older lookup to the newest declaration, permitting
+reflexivity in Execute, checking an erased let value in the enclosing phase,
+capturing an outer variable while renaming a let body, and weakening the
+packed payload premise or the Sigma witness premise to a free finite type.
+The lookup and renaming laws, runtime eligibility theorem, erased-let
+regressions, and the two payload type regressions reject these changes.
+Shared sources and build artifacts were not mutated.
+
+The proof gate also passed in an isolated copy before two audit mutations.
+Removing the axiom-free report failed with 12 total reports and none free.
+Replacing it with a `propext` result kept 13 reports but still failed the
+required axiom-free count. Both mutated Lean targets compiled successfully;
+the shell audit then exited with status 1.
+
+Typed renaming and weakening do not establish general dependent
+substitution, conversion adequacy, or erasure simulation. There is still no
+proved correspondence with the OCaml checker.
+
 ## M1 indexed formation and binding composition, 2026-09-07
 
 Implemented on base `b8c8d55` in a workspace checkout. Added indexed equality,

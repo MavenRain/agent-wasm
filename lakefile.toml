@@ -2,7 +2,8 @@ name = "agent-wasm"
 version = "0.1.0"
 defaultTargets = [
   "AgentWasm", "BindingTest", "PhaseTest", "BindingLawsTest",
-  "ErasedContextTest", "IndexedTypeTest"
+  "ErasedContextTest", "IndexedTypeTest", "DependentContextTest",
+  "DependentTermTest"
 ]
 
 [[lean_lib]]
@@ -31,5 +32,15 @@ moreLeanArgs = ["-DwarningAsError=true"]
 
 [[lean_lib]]
 name = "IndexedTypeTest"
+srcDir = "proof-test"
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "DependentContextTest"
+srcDir = "proof-test"
+moreLeanArgs = ["-DwarningAsError=true"]
+
+[[lean_lib]]
+name = "DependentTermTest"
 srcDir = "proof-test"
 moreLeanArgs = ["-DwarningAsError=true"]
