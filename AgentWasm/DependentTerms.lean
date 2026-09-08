@@ -6,8 +6,8 @@ namespace AgentWasm.Dependent
 open Finite
 open Finite.Phased
 
-/-- Finite indices remain separate from dependent values. In particular,
-    a refinement payload projection cannot yet occur inside an index. -/
+/-- Index syntax remains separate from dependent values. It admits computed
+    payload and first projections, but not arbitrary dependent terms. -/
 inductive Term : Nat → Type where
   | var : Fin n → Term n
   | finite : Finite.Term n → Term n

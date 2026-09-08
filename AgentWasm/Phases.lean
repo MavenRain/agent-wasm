@@ -25,7 +25,8 @@ def Allowed (p : Phase) (q : Quantities n) : Term n → Prop
   | .uint (_arg1) | .boolean (_arg2) => True
   | .add a b | .cmp (_arg1) a b | .pair a b => Allowed p q a ∧ Allowed p q b
   | .cond c a b => Allowed p q c ∧ Allowed p q a ∧ Allowed p q b
-  | .fst a | .snd a | .inl (_arg1) a | .inr (_arg2) a | .ann a (_arg3) => Allowed p q a
+  | .fst a | .snd a | .value a | .dfst a
+  | .inl (_arg1) a | .inr (_arg2) a | .ann a (_arg3) => Allowed p q a
   | .case (_arg1) s a b =>
       Allowed p q s ∧ Allowed p (extend q) a ∧ Allowed p (extend q) b
   | .letIn (_arg1) v body => Allowed p q v ∧ Allowed p (extend q) body
@@ -52,7 +53,8 @@ theorem Allowed.rename {p : Phase} {q : Quantities n} {t : Term n}
       ⟨ht.1.rename ρ hρ, ht.2.rename ρ hρ⟩
   | .cond (_arg1) (_arg2) (_arg3) =>
       ⟨ht.1.rename ρ hρ, ht.2.1.rename ρ hρ, ht.2.2.rename ρ hρ⟩
-  | .fst a | .snd a | .inl (_ty) a | .inr (_ty) a | .ann a (_ty) =>
+  | .fst a | .snd a | .value a | .dfst a
+  | .inl (_ty) a | .inr (_ty) a | .ann a (_ty) =>
       Allowed.rename (t := a) ht ρ hρ
   | .case (_arg1) (_arg2) (_arg3) (_arg4) => ⟨ht.1.rename ρ hρ,
       ht.2.1.rename (liftRen ρ) (liftRen_preserves hρ),
@@ -104,7 +106,8 @@ theorem Allowed.subst {p : Phase} {q : Quantities n} {t : Term n}
       ⟨ht.1.subst σ hσ, ht.2.subst σ hσ⟩
   | .cond (_arg1) (_arg2) (_arg3) =>
       ⟨ht.1.subst σ hσ, ht.2.1.subst σ hσ, ht.2.2.subst σ hσ⟩
-  | .fst a | .snd a | .inl (_ty) a | .inr (_ty) a | .ann a (_ty) =>
+  | .fst a | .snd a | .value a | .dfst a
+  | .inl (_ty) a | .inr (_ty) a | .ann a (_ty) =>
       Allowed.subst (t := a) ht σ hσ
   | .case (_arg1) (_arg2) (_arg3) (_arg4) => ⟨ht.1.subst σ hσ,
       ht.2.1.subst (liftSub σ) (liftSub_allowed hσ),
@@ -137,7 +140,8 @@ theorem allowed_ghost (q : Quantities n) (t : Term n) : Allowed .ghost q t :=
   | .uint (_arg1) | .boolean (_arg2) => True.intro
   | .add a b | .cmp (_arg1) a b | .pair a b => ⟨allowed_ghost q a, allowed_ghost q b⟩
   | .cond c a b => ⟨allowed_ghost q c, allowed_ghost q a, allowed_ghost q b⟩
-  | .fst a | .snd a | .inl (_arg1) a | .inr (_arg2) a | .ann a (_arg3) => allowed_ghost q a
+  | .fst a | .snd a | .value a | .dfst a
+  | .inl (_arg1) a | .inr (_arg2) a | .ann a (_arg3) => allowed_ghost q a
   | .case (_arg1) s a b =>
       ⟨allowed_ghost q s, allowed_ghost (extend q) a, allowed_ghost (extend q) b⟩
   | .letIn (_arg1) v body => ⟨allowed_ghost q v, allowed_ghost (extend q) body⟩

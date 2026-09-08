@@ -80,6 +80,8 @@ depterm_names='rename_identity rename_id runtimeType_rename HasType.wellFormed
   quantityRenaming_lift HasType.rename HasType.weaken'
 depbranch_names='indicator_rename branchEvidence_rename indicator_hasType
   branchEvidence_wellFormed'
+depindex_names='IndexHasSchema.rename IndexHasSchema.weaken
+  IndexHasSchema.branchType IndexHasSchema.wellFormed'
 
 audit_axioms proof-test/BindingTest.lean 6 0 '' "$binding_names"
 audit_axioms proof-test/PhaseTest.lean 6 0 '' "$phase_names"
@@ -90,6 +92,7 @@ audit_axioms proof-test/DependentContextTest.lean 7 0 '' "$depcontext_names"
 audit_axioms proof-test/DependentTermTest.lean 13 1 quantityRenaming_access \
   "$depterm_names"
 audit_axioms proof-test/DependentBranchTest.lean 4 0 '' "$depbranch_names"
+audit_axioms proof-test/DependentIndexTest.lean 4 0 '' "$depindex_names"
 
 hits=$(rg -n ':= by|^[[:space:]]*by$|^axiom |^partial |^unsafe |sorry' \
   AgentWasm.lean AgentWasm proof-test || true)

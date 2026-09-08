@@ -1,5 +1,62 @@
 # Compiler validation, 2026-09-08
 
+## M1 computed dependent projection indices, 2026-09-08
+
+Implemented on base `5e13d8b` in an isolated workspace checkout. The shared
+Lean raw syntax adds refinement payload and Sigma first projection, preserving
+its total binding operations and laws. The original finite typing judgment
+does not type the new forms. Dependent index typing uses a mutual schema
+judgment for operands, including computed conditionals and products with
+exact dependent schemas. All operand schemas are branch eligible, including
+in Ghost. The OCaml compiler is unchanged.
+
+`sh scripts/check.sh` passed with zero Lean errors, incomplete proofs, or
+warnings and zero OCaml build errors or warnings. The nine proof regression
+targets report 81 audited results: 80 depend only on `propext`, and
+`quantityRenaming_access` remains axiom-free. The new target audits
+`IndexHasSchema.rename`, `weaken`, `branchType`, and `wellFormed` by name.
+The source gate found no tactic blocks, project axioms, partial or unsafe
+definitions, or unfinished proofs. The kernel passed 356 cases; the binding
+suite passed 7,168 cases; and the host suite passed 1,964 programs across
+3,928 Node and Wasmtime executions.
+
+The 48 new Lean assertions cover computed payload and first projections,
+exact operand schemas, projected endpoints and checked-branch conditions,
+renaming under term and type binders, open substitutions, and explicit
+instantiation equations. Negative results reject implicit shape coercion,
+wrong projection domains, stale endpoints, mismatched conditional schemas,
+a non-Boolean condition, and erased Execute access in both selected and
+unselected operands.
+
+A regression isolates a runtime-labelled variable whose product contains
+equality evidence beside a refinement. Ordinary relevance access succeeds,
+but the operand schema is not branch eligible, so its payload cannot enter
+an Execute index. General dependent Ghost terms can project that payload;
+the restricted index language rejects it in Ghost too. This documents the
+conservative operand boundary and guards the intermediate runtime schema
+check identified during review.
+
+Six compiler probes agreed with the represented cases: acceptance of
+`value (if c p q)` in equality endpoints, a conditional Sigma first projection
+inside a comparison, and an erased refinement projection in a Ghost type;
+rejection of an erased unselected operand, an implicit refinement-to-u32
+coercion, and conditionals with distinct refinement schemas. These are
+compiler checks, not a proved correspondence or an evaluation theorem.
+
+Five isolated mutations were rejected. Swapping a renaming constructor,
+dropping the Sigma first-projection constructor during substitution, and
+removing the variable schema guard failed the library's identity or branch
+eligibility proofs. Two other mutants compiled the full library cleanly:
+bypassing projection operand access and allowing distinct conditional arm
+schemas. Both failed the new regressions and admitted explicit forbidden
+witnesses in separate probes. The latter two results demonstrate regression
+coverage beyond the library's universal binding and formation statements.
+
+A fresh downstream Lake package required the checkout by path, imported only
+`AgentWasm`, typed computed payload and first-projection indices, and used all
+four public schema theorems. It built with zero errors, incomplete proofs, or
+warnings. `git diff --check` passed, and added prose contains no em dash.
+
 ## M1 dependent cases and checked branches, 2026-09-08
 
 Implemented on base `fb8aaf8` in an isolated workspace checkout. The restricted

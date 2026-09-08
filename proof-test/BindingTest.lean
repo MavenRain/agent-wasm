@@ -30,7 +30,7 @@ example : rename (fun i : Fin 1 => i.succ)
 example : instantiate (.letIn .bool (.var 0) (.var 0))
     (.boolean false : Term 0) = .letIn .bool (.boolean false) (.var 0) := rfl
 
--- Every non-binding constructor participates in substitution.
+-- Every finite-typed non-binding constructor participates in substitution.
 example : instantiate
     (.ann (.cond (.cmp .le (.var 0) (.uint 7))
       (.fst (.pair (.add (.var 0) (.uint 1)) (.boolean true)))

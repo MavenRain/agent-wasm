@@ -20,12 +20,12 @@ an integer decision. The existing integer export ABI remains unchanged. Closed
 comparisons and conditionals participate in definitional conversion. Directed
 and generated programs are checked against an independent interpreter on both hosts.
 
-Next: extend the restricted dependent index language with computed dependent
-projections. Then add refinement evidence projection and Sigma second
-projection to the dependent term fragment. Then prove general dependent typed
-substitution through context suffixes. Then connect the model to the
-implementation. Extend the remaining source constructs alongside that work.
-Then cover conversion adequacy, branch realization, and erasure simulation.
+Next: add refinement evidence projection and Sigma second projection to the
+dependent term fragment, extending projection operands as needed. Then prove
+general dependent typed substitution through context suffixes. Then connect
+the model to the implementation. Extend the remaining source constructs
+alongside that work. Then cover conversion adequacy, branch realization,
+preservation, the value relation, and erasure simulation.
 Named error variants and a reusable surface for these contracts remain open.
 
 Implemented second slice: non-dependent products, eager pairs, and projections,
@@ -151,6 +151,19 @@ Identity renaming, typed renaming, weakening, result formation, and runtime
 eligibility extend to both constructs. Regressions cover evidence consumption
 inside refinement packages, stale outcomes, erased access, and result capture.
 This establishes typing properties, not branch realization or evaluation.
+
+Implemented seventeenth slice: computed refinement payload and Sigma first
+projections in the Lean index language. Projection operands retain their exact
+branch-eligible dependent schemas through variables, products, projections, and
+conditionals. Both conditional arms have the same branch-eligible schema.
+Explicit `value` and `dfst` produce base indices usable in arithmetic,
+conditions, equality endpoints, refinement families, and Sigma ranges.
+Renaming, weakening, binding composition, and phase access cover the new raw
+syntax. Operand schema formation follows from a formed telescope. The finite
+typing judgment gains no implicit coercion or dependent projection rule.
+Index operands still exclude arbitrary dependent constructions, dependent
+let or case results, and equality-bearing products even in Ghost.
+This slice does not add evidence or second projection.
 
 Dependent substitution, preservation, and erasure simulation remain unproved
 for the general supported fragment. Establish them before calling it

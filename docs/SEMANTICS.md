@@ -11,7 +11,10 @@ contexts, with binding composition laws. A further restricted model types
 dependent values over scoped telescopes, including Ghost evidence, refinement
 packages, finite-domain dependent pairs, and lets of either relevance. It
 proves result formation, runtime eligibility, renaming, and weakening, using
-exact schemas and a conservative finite index language without shape coercion.
+exact schemas and restricted indices without shape coercion. These indices
+include explicit refinement payload and Sigma first projections of variables,
+products, and conditional operands with exact branch-eligible dependent schemas.
+Equality-bearing product operands remain excluded in Ghost as well as Execute.
 General dependent substitution and implementation correspondence remain open.
 Its exact boundary is stated separately. The full dependent obligations below
 remain open.
@@ -313,8 +316,10 @@ The restricted Lean model includes dependent case handlers and checked branches
 with erased equality declarations. Their typed renaming and weakening results
 do not prove that evaluation realizes a branch assumption.
 
-Mechanization next extends the dependent syntax and its index language and
-proves general dependent typed substitution, then conversion adequacy and
-branch realization, then the value relation and erasure simulation.
+Mechanization next adds evidence and Sigma second projection to the dependent
+syntax, extends index operands, and proves general dependent typed
+substitution. Then it connects the model to the implementation. Then it covers
+conversion adequacy, branch realization, preservation, the value relation, and
+erasure simulation.
 No milestone should be called verified until its claimed fragment and trusted
 backend boundary have corresponding completed proofs.

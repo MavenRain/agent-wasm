@@ -305,9 +305,11 @@ dependent values over scoped telescopes, including Ghost equality evidence,
 refined packages, finite-domain dependent pairs, lets of either relevance,
 dependent sum case analysis, and checked branches with erased evidence.
 It proves type formation, runtime eligibility, renaming, and weakening for
-that model. General dependent substitution remains open. See the
-[mechanization boundary](docs/MECHANIZATION.md); the dependent compiler and
-its erasure are not formally verified.
+that model. Restricted indices include computed refinement payload and Sigma
+first projections, retaining exact operand schemas and phase access. Their
+binding laws and schema renaming are proved. General dependent substitution
+remains open. See the [mechanization boundary](docs/MECHANIZATION.md); the
+dependent compiler and its erasure are not formally verified.
 
 ```sh
 sh scripts/check.sh

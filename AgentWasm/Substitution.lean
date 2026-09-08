@@ -20,7 +20,9 @@ inductive Comparison where
   | eq | lt | le
   deriving DecidableEq, Repr
 
-/-- Scope is intrinsic; typing is separate. The newest binder has index 0. -/
+/-- Scope is intrinsic; typing is separate. The newest binder has index 0.
+    Dependent projections share binding operations with the finite syntax;
+    their typing is provided separately by the dependent index judgment. -/
 inductive Term : Nat → Type where
   | var : Fin n → Term n
   | uint : Fin (2 ^ 32) → Term n
@@ -31,6 +33,8 @@ inductive Term : Nat → Type where
   | pair : Term n → Term n → Term n
   | fst : Term n → Term n
   | snd : Term n → Term n
+  | value : Term n → Term n
+  | dfst : Term n → Term n
   | inl : Ty → Term n → Term n
   | inr : Ty → Term n → Term n
   | case : Ty → Term n → Term (n + 1) → Term (n + 1) → Term n
@@ -58,6 +62,8 @@ def rename (ρ : Renaming n m) : Term n → Term m
   | .pair a b => .pair (rename ρ a) (rename ρ b)
   | .fst a => .fst (rename ρ a)
   | .snd a => .snd (rename ρ a)
+  | .value a => .value (rename ρ a)
+  | .dfst a => .dfst (rename ρ a)
   | .inl b a => .inl b (rename ρ a)
   | .inr a b => .inr a (rename ρ b)
   | .case r s a b =>
@@ -79,6 +85,8 @@ def subst (σ : Substitution n m) : Term n → Term m
   | .pair a b => .pair (subst σ a) (subst σ b)
   | .fst a => .fst (subst σ a)
   | .snd a => .snd (subst σ a)
+  | .value a => .value (subst σ a)
+  | .dfst a => .dfst (subst σ a)
   | .inl b a => .inl b (subst σ a)
   | .inr a b => .inr a (subst σ b)
   | .case r s a b =>
@@ -111,6 +119,8 @@ theorem rename_identity (t : Term n) (ρ : Renaming n n) (h : ∀ i, ρ i = i) :
   | .pair a b => congrArg2 Term.pair (rename_identity a ρ h) (rename_identity b ρ h)
   | .fst a => congrArg Term.fst (rename_identity a ρ h)
   | .snd a => congrArg Term.snd (rename_identity a ρ h)
+  | .value a => congrArg Term.value (rename_identity a ρ h)
+  | .dfst a => congrArg Term.dfst (rename_identity a ρ h)
   | .inl b a => congrArg (Term.inl b) (rename_identity a ρ h)
   | .inr a b => congrArg (Term.inr a) (rename_identity b ρ h)
   | .case r s a b => congrArg3 (Term.case r) (rename_identity s ρ h)
@@ -139,6 +149,8 @@ theorem subst_identity (t : Term n) (σ : Substitution n n)
   | .pair a b => congrArg2 Term.pair (subst_identity a σ h) (subst_identity b σ h)
   | .fst a => congrArg Term.fst (subst_identity a σ h)
   | .snd a => congrArg Term.snd (subst_identity a σ h)
+  | .value a => congrArg Term.value (subst_identity a σ h)
+  | .dfst a => congrArg Term.dfst (subst_identity a σ h)
   | .inl b a => congrArg (Term.inl b) (subst_identity a σ h)
   | .inr a b => congrArg (Term.inr a) (subst_identity b σ h)
   | .case r s a b => congrArg3 (Term.case r) (subst_identity s σ h)

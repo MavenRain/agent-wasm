@@ -35,8 +35,10 @@ theorem liftRen_preserves {Γ : Context n} {Δ : Context m}
     (fun i => Eq.trans (congrArg (Indexed.rename Fin.succ) (hρ i))
       (rename_weaken (lookup Γ i) ρ).symm)
 
-/-- Only declarations explicitly having a base type enter the finite index
-language. Equality evidence and dependent payloads are not coerced to shapes. -/
+mutual
+
+/-- Base indices require explicit projections from dependent operands.
+Equality evidence and dependent payloads are not coerced to shapes. -/
 inductive IndexHasType : Context n → Finite.Term n → Finite.Ty → Prop where
   | var : lookup Γ i = .base a → IndexHasType Γ (.var i) a
   | uint : IndexHasType Γ (.uint v) .u32
@@ -61,6 +63,28 @@ inductive IndexHasType : Context n → Finite.Term n → Finite.Ty → Prop wher
       IndexHasType (.snoc Γ (.base a)) body b →
       IndexHasType Γ (.letIn a v body) b
   | ann : IndexHasType Γ t a → IndexHasType Γ (.ann t a) a
+  | value : IndexHasSchema Γ t (.refine a l r) →
+      IndexHasType Γ (.value t) a
+  | dfst : IndexHasSchema Γ t (.sigma a b) →
+      IndexHasType Γ (.dfst t) a
+
+/-- Projection operands retain exact, branch-eligible schemas. This restriction
+also applies in Ghost, keeping equality-bearing operands outside this slice. -/
+inductive IndexHasSchema : Context n → Finite.Term n → Indexed.Ty n → Prop where
+  | base : IndexHasType Γ t a → IndexHasSchema Γ t (.base a)
+  | var : Indexed.BranchType (lookup Γ i) →
+      IndexHasSchema Γ (.var i) (lookup Γ i)
+  | pair : IndexHasSchema Γ a x → IndexHasSchema Γ b y →
+      IndexHasSchema Γ (.pair a b) (.product x y)
+  | fst : IndexHasSchema Γ t (.product a b) → IndexHasSchema Γ (.fst t) a
+  | snd : IndexHasSchema Γ t (.product a b) → IndexHasSchema Γ (.snd t) b
+  | cond : IndexHasType Γ c .bool → Indexed.BranchType a →
+      IndexHasSchema Γ l a → IndexHasSchema Γ r a →
+      IndexHasSchema Γ (.cond c l r) a
+
+end
+
+mutual
 
 theorem IndexHasType.rename {Γ : Context n} {t : Finite.Term n} {a : Finite.Ty}
     (ht : IndexHasType Γ t a) {Δ : Context m} (ρ : Renaming n m)
@@ -84,14 +108,50 @@ theorem IndexHasType.rename {Γ : Context n} {t : Finite.Term n} {a : Finite.Ty}
   | .letIn hv hb => .letIn (hv.rename ρ hρ)
       (hb.rename (liftRen ρ) (liftRen_preserves hρ _))
   | .ann ht => .ann (ht.rename ρ hρ)
+  | .value ht => .value (ht.rename ρ hρ)
+  | .dfst ht => .dfst (ht.rename ρ hρ)
+
+theorem IndexHasSchema.rename {Γ : Context n} {t : Finite.Term n}
+    {a : Indexed.Ty n} (ht : IndexHasSchema Γ t a)
+    {Δ : Context m} (ρ : Renaming n m) (hρ : RenamingPreserves Γ Δ ρ) :
+    IndexHasSchema Δ (Finite.rename ρ t) (Indexed.rename ρ a) :=
+  match ht with
+  | .base ht => .base (ht.rename ρ hρ)
+  | .var ba => (hρ _) ▸ IndexHasSchema.var
+      ((hρ _).symm ▸ Eq.mpr (Indexed.branch_rename _ ρ) ba)
+  | .pair ha hb => .pair (ha.rename ρ hρ) (hb.rename ρ hρ)
+  | .fst ht => .fst (ht.rename ρ hρ)
+  | .snd ht => .snd (ht.rename ρ hρ)
+  | .cond hc ba hl hr => .cond (hc.rename ρ hρ)
+      (Eq.mpr (Indexed.branch_rename _ ρ) ba)
+      (hl.rename ρ hρ) (hr.rename ρ hρ)
+
+end
 
 theorem IndexHasType.weaken {Γ : Context n} {t : Finite.Term n} {a : Finite.Ty}
     (ht : IndexHasType Γ t a) (b : Indexed.Ty n) :
     IndexHasType (.snoc Γ b) (Finite.rename Fin.succ t) a :=
   ht.rename Fin.succ (fun (_i) => rfl)
 
-/-- Formation checks indices against the full dependent telescope. The index
-language and the refinement and Sigma domains remain finite. -/
+theorem IndexHasSchema.weaken {Γ : Context n} {t : Finite.Term n}
+    {a : Indexed.Ty n} (ht : IndexHasSchema Γ t a) (b : Indexed.Ty n) :
+    IndexHasSchema (.snoc Γ b) (Finite.rename Fin.succ t)
+      (Indexed.rename Fin.succ a) :=
+  ht.rename Fin.succ (fun (_i) => rfl)
+
+/-- No intermediate projection operand exposes equality, even in a product. -/
+theorem IndexHasSchema.branchType {Γ : Context n} {t : Finite.Term n}
+    {a : Indexed.Ty n} (ht : IndexHasSchema Γ t a) : Indexed.BranchType a :=
+  match ht with
+  | .base (_ht) => True.intro
+  | .var ba => ba
+  | .pair ha hb => ⟨ha.branchType, hb.branchType⟩
+  | .fst ht => ht.branchType.1
+  | .snd ht => ht.branchType.2
+  | .cond (_hc) ba (_hl) (_hr) => ba
+
+/-- Formation checks indices against the full dependent telescope. Index result
+types and the refinement and Sigma domains remain finite. -/
 inductive WellFormed : Context n → Indexed.Ty n → Prop where
   | base : WellFormed Γ (.base a)
   | eq : IndexHasType Γ l .u32 → IndexHasType Γ r .u32 →
@@ -142,5 +202,17 @@ theorem Context.WellFormed.lookup {Γ : Context n}
   | 0, .nil, .nil, i => Fin.elim0 i
   | _ + 1, .snoc _ _, .snoc hΓ ha, i =>
       Fin.cases (ha.weaken _) (fun j => (hΓ.lookup j).weaken _) i
+
+/-- Computed operands have formed schemas when their telescope is formed. -/
+theorem IndexHasSchema.wellFormed {Γ : Context n} {t : Finite.Term n}
+    {a : Indexed.Ty n} (ht : IndexHasSchema Γ t a)
+    (hΓ : Context.WellFormed Γ) : Dependent.WellFormed Γ a :=
+  match ht with
+  | .base (_ht) => .base
+  | .var (_ba) => hΓ.lookup _
+  | .pair ha hb => .product (ha.wellFormed hΓ) (hb.wellFormed hΓ)
+  | .fst ht => match ht.wellFormed hΓ with | .product ha (_hb) => ha
+  | .snd ht => match ht.wellFormed hΓ with | .product (_ha) hb => hb
+  | .cond (_hc) (_ba) hl (_hr) => hl.wellFormed hΓ
 
 end AgentWasm.Dependent
